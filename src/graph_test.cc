@@ -215,6 +215,31 @@ TEST_F(GraphTest, RootNodes) {
   }
 }
 
+TEST_F(GraphTest, CollectInputs) {
+  ASSERT_NO_FATAL_FAILURE(AssertParse(
+      &state_,
+      "build out$ 1: cat in1 in2 in$ with$ space | implicit || order_only\n"));
+
+  std::vector<std::string> inputs;
+  Edge* edge = GetNode("out 1")->in_edge();
+  edge->CollectInputs(false, &inputs);
+  EXPECT_EQ(3u, inputs.size());
+  EXPECT_EQ("in1", inputs[0]);
+  EXPECT_EQ("in2", inputs[1]);
+  EXPECT_EQ("in with space", inputs[2]);
+
+  inputs.clear();
+  edge->CollectInputs(true, &inputs);
+  EXPECT_EQ(3u, inputs.size());
+  EXPECT_EQ("in1", inputs[0]);
+  EXPECT_EQ("in2", inputs[1]);
+#ifdef _WIN32
+  EXPECT_EQ("\"ii with space\"", inputs[2]);
+#else
+  EXPECT_EQ("'in with space'", inputs[2]);
+#endif
+}
+
 TEST_F(GraphTest, VarInOutPathEscaping) {
   ASSERT_NO_FATAL_FAILURE(AssertParse(&state_,
 "build a$ b: cat no'space with$ space$$ no\"space2\n"));

@@ -31,13 +31,15 @@
 #include <unistd.h>
 #endif
 
+#include <algorithm>
+
 #include "browse.h"
 #include "build.h"
 #include "build_log.h"
-#include "deps_log.h"
 #include "clean.h"
 #include "debug_flags.h"
 #include "depfile_parser.h"
+#include "deps_log.h"
 #include "disk_interface.h"
 #include "graph.h"
 #include "graphviz.h"
@@ -744,7 +746,8 @@ int NinjaMain::ToolCommands(const Options* options, int argc, char* argv[]) {
   return 0;
 }
 
-void PrintInputs(Edge* edge, set<Edge*>* seen) {
+void CollectInputs(Edge* edge, set<Edge*>* seen,
+                   std::vector<std::string>* result) {
   if (!edge)
     return;
   if (!seen->insert(edge).second)
@@ -752,10 +755,11 @@ void PrintInputs(Edge* edge, set<Edge*>* seen) {
 
   for (vector<Node*>::iterator in = edge->inputs_.begin();
        in != edge->inputs_.end(); ++in)
-    PrintInputs((*in)->in_edge(), seen);
+    CollectInputs((*in)->in_edge(), seen, result);
 
-  if (!edge->is_phony())
-    puts(edge->GetBinding("in_newline").c_str());
+  if (!edge->is_phony()) {
+    edge->CollectInputs(true, result);
+  }
 }
 
 int NinjaMain::ToolInputs(const Options* options, int argc, char* argv[]) {
@@ -766,9 +770,17 @@ int NinjaMain::ToolInputs(const Options* options, int argc, char* argv[]) {
     return 1;
   }
 
-  set<Edge*> seen;
+  std::set<Edge*> seen;
+  std::vector<std::string> result;
   for (vector<Node*>::iterator in = nodes.begin(); in != nodes.end(); ++in)
-    PrintInputs((*in)->in_edge(), &seen);
+    CollectInputs((*in)->in_edge(), &seen, &result);
+
+  // Make output deterministic by sorting then removing duplicates.
+  std::sort(result.begin(), result.end());
+  result.erase(std::unique(result.begin(), result.end()), result.end());
+
+  for (size_t n = 0; n < result.size(); ++n)
+    puts(result[n].c_str());
 
   return 0;
 }
