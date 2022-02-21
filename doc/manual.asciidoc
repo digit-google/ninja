@@ -258,7 +258,10 @@ executed in order, may be used to rebuild those targets, assuming that all
 output files are out of date.
 
 `inputs`:: given a list of targets, print a list of all inputs used to
-rebuild those targets.
+rebuild those targets. Since Ninja 1,12, the `--type` option can be used
+to change the set of inputs printed, for example
++ninja -t inputs --type=explicit _targets_+ will only print explicit inputs.
+Use `--type=list` to list all possible values and purpose.
 _Available since Ninja 1.11._
 
 `clean`:: remove built files. By default it removes all built files

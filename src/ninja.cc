@@ -36,13 +36,14 @@
 #include "browse.h"
 #include "build.h"
 #include "build_log.h"
-#include "deps_log.h"
 #include "clean.h"
 #include "debug_flags.h"
 #include "depfile_parser.h"
+#include "deps_log.h"
 #include "disk_interface.h"
 #include "graph.h"
 #include "graphviz.h"
+#include "inputs_type.h"
 #include "json.h"
 #include "manifest_parser.h"
 #include "metrics.h"
@@ -746,7 +747,7 @@ int NinjaMain::ToolCommands(const Options* options, int argc, char* argv[]) {
   return 0;
 }
 
-void CollectInputs(Edge* edge, std::set<Edge*>* seen,
+void CollectInputs(Edge* edge, std::set<Edge*>* seen, InputsType inputs_type,
                    std::vector<std::string>* result) {
   if (!edge)
     return;
@@ -755,10 +756,10 @@ void CollectInputs(Edge* edge, std::set<Edge*>* seen,
 
   for (vector<Node*>::iterator in = edge->inputs_.begin();
        in != edge->inputs_.end(); ++in)
-    CollectInputs((*in)->in_edge(), seen, result);
+    CollectInputs((*in)->in_edge(), seen, inputs_type, result);
 
   if (!edge->is_phony()) {
-    edge->CollectInputs(true, result);
+    edge->CollectInputs(true, inputs_type.value, result);
   }
 }
 
@@ -769,20 +770,38 @@ int NinjaMain::ToolInputs(const Options* options, int argc, char* argv[]) {
   argv--;
   optind = 1;
   int opt;
+  enum { OPT_TYPE = 1 };
   const option kLongOptions[] = { { "help", no_argument, NULL, 'h' },
+                                  { "type", required_argument, NULL, OPT_TYPE },
                                   { NULL, 0, NULL, 0 } };
+  InputsType inputs_type;
   while ((opt = getopt_long(argc, argv, "h", kLongOptions, NULL)) != -1) {
     switch (opt) {
+    case OPT_TYPE:
+      if (!strcmp(optarg, "list")) {
+        printf("Possible '-t inputs --type=<TYPE>' values are:\n");
+        int count = 0;
+        const InputsType::TypeInfo* infos = InputsType::GetTypeInfos(&count);
+        for (int n = 0; n < count; ++n)
+          printf("  %-14s %s\n", infos[n].name, infos[n].help);
+        printf("\n");
+        return 0;
+      }
+      if (!inputs_type.ParseArg(optarg))
+        Fatal("Invalid --type value, see '-t inputs --type=list'");
+      break;
     case 'h':
     default:
       // clang-format off
       printf(
 "Usage '-t inputs [options] [targets]\n"
 "\n"
-"List all inputs used for a set of targets. Note that this includes\n"
-"explicit, implicit and order-only inputs, but not validation ones.\n\n"
+"List inputs used for a set of targets. Note that this returns all inputs\n"
+"by default, but the --type=TYPE option can be used to select a different set.\n\n"
 "Options:\n"
-"  -h, --help   Print this message.\n");
+"  -h, --help   Print this message.\n"
+"  --type=TYPE  Specify the type of inputs to print, Use 'list' to print\n"
+"               all possible values.\n");
       // clang-format on
       return 1;
     }
@@ -800,7 +819,7 @@ int NinjaMain::ToolInputs(const Options* options, int argc, char* argv[]) {
   std::set<Edge*> seen;
   std::vector<std::string> result;
   for (vector<Node*>::iterator in = nodes.begin(); in != nodes.end(); ++in)
-    CollectInputs((*in)->in_edge(), &seen, &result);
+    CollectInputs((*in)->in_edge(), &seen, inputs_type, &result);
 
   // Make output deterministic by sorting then removing duplicates.
   std::sort(result.begin(), result.end());

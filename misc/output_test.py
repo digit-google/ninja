@@ -150,6 +150,27 @@ order_only
 out1
 out2
 ''')
+        self.assertEqual(run(plan, flags='-t inputs --type=all out3'),
+'''implicit
+in1
+in2
+order_only
+out1
+out2
+''')
+        self.assertEqual(run(plan, flags='-t inputs --type=explicit out3'),
+'''in1
+in2
+out1
+out2
+''')
+        self.assertEqual(run(plan, flags='-t inputs --type=explicit-implicit out3'),
+'''implicit
+in1
+in2
+out1
+out2
+''')
 
 
 if __name__ == '__main__':

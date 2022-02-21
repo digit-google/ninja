@@ -22,6 +22,7 @@
 
 #include "dyndep.h"
 #include "eval_env.h"
+#include "inputs_type.h"
 #include "timestamp.h"
 #include "util.h"
 
@@ -196,7 +197,8 @@ struct Edge {
   void Dump(const char* prefix="") const;
 
   // Append all edge explicit inputs to |*out|. Possibly with shell escaping.
-  void CollectInputs(bool shell_escape, std::vector<std::string>* out) const;
+  void CollectInputs(bool shell_escape, InputsType::Type inputs_type,
+                     std::vector<std::string>* out) const;
 
   const Rule* rule_;
   Pool* pool_;

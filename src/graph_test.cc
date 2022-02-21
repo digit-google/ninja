@@ -225,7 +225,7 @@ TEST_F(GraphTest, CollectInputs) {
 
   // Test without shell escaping.
   inputs.clear();
-  edge->CollectInputs(false, &inputs);
+  edge->CollectInputs(false, InputsType::All, &inputs);
   EXPECT_EQ(5u, inputs.size());
   EXPECT_EQ("in1", inputs[0]);
   EXPECT_EQ("in2", inputs[1]);
@@ -235,7 +235,7 @@ TEST_F(GraphTest, CollectInputs) {
 
   // Test with shell escaping.
   inputs.clear();
-  edge->CollectInputs(true, &inputs);
+  edge->CollectInputs(true, InputsType::All, &inputs);
   EXPECT_EQ(5u, inputs.size());
   EXPECT_EQ("in1", inputs[0]);
   EXPECT_EQ("in2", inputs[1]);
@@ -246,6 +246,48 @@ TEST_F(GraphTest, CollectInputs) {
 #endif
   EXPECT_EQ("implicit", inputs[3]);
   EXPECT_EQ("order_only", inputs[4]);
+
+  // InputsType::Explicit, no shell escaping
+  inputs.clear();
+  edge->CollectInputs(false, InputsType::Explicit, &inputs);
+  EXPECT_EQ(3u, inputs.size());
+  EXPECT_EQ("in1", inputs[0]);
+  EXPECT_EQ("in2", inputs[1]);
+  EXPECT_EQ("in with space", inputs[2]);
+
+  // InputsType::Explicit, with shell escaping
+  inputs.clear();
+  edge->CollectInputs(true, InputsType::Explicit, &inputs);
+  EXPECT_EQ(3u, inputs.size());
+  EXPECT_EQ("in1", inputs[0]);
+  EXPECT_EQ("in2", inputs[1]);
+#ifdef _WIN32
+  EXPECT_EQ("\"in with space\"", inputs[2]);
+#else
+  EXPECT_EQ("'in with space'", inputs[2]);
+#endif
+
+  // InputsType::ExplicitImplicit, no shell escaping
+  inputs.clear();
+  edge->CollectInputs(false, InputsType::ExplicitImplicit, &inputs);
+  EXPECT_EQ(4u, inputs.size());
+  EXPECT_EQ("in1", inputs[0]);
+  EXPECT_EQ("in2", inputs[1]);
+  EXPECT_EQ("in with space", inputs[2]);
+  EXPECT_EQ("implicit", inputs[3]);
+
+  // InputsType::All, with shell escaping
+  inputs.clear();
+  edge->CollectInputs(true, InputsType::ExplicitImplicit, &inputs);
+  EXPECT_EQ(4u, inputs.size());
+  EXPECT_EQ("in1", inputs[0]);
+  EXPECT_EQ("in2", inputs[1]);
+#ifdef _WIN32
+  EXPECT_EQ("\"in with space\"", inputs[2]);
+#else
+  EXPECT_EQ("'in with space'", inputs[2]);
+#endif
+  EXPECT_EQ("implicit", inputs[3]);
 }
 
 TEST_F(GraphTest, VarInOutPathEscaping) {

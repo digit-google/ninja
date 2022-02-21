@@ -456,11 +456,21 @@ std::string EdgeEnv::MakePathList(const Node* const* const span,
   return result;
 }
 
-void Edge::CollectInputs(bool shell_escape,
+void Edge::CollectInputs(bool shell_escape, InputsType::Type inputs_type,
                          std::vector<std::string>* out) const {
-  for (std::vector<Node*>::const_iterator it = inputs_.begin();
-       it != inputs_.end(); ++it) {
-    std::string path = (*it)->PathDecanonicalized();
+  int count;
+  switch (inputs_type) {
+  case InputsType::ExplicitImplicit:
+    count = inputs_.size() - order_only_deps_;
+    break;
+  case InputsType::Explicit:
+    count = inputs_.size() - implicit_deps_ - order_only_deps_;
+    break;
+  default:  // InputsType::All
+    count = inputs_.size();
+  }
+  for (int n = 0; n < count; ++n) {
+    std::string path = inputs_[n]->PathDecanonicalized();
     if (shell_escape) {
       std::string unescaped;
       unescaped.swap(path);
