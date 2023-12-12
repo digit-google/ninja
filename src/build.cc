@@ -969,13 +969,13 @@ bool Builder::ExtractDeps(CommandRunner::Result* result,
     if (!parser.Parse(result->output, deps_prefix, &output, err))
       return false;
     result->output = output;
-    for (set<string>::iterator i = parser.includes_.begin();
-         i != parser.includes_.end(); ++i) {
+    for (const std::string& include : parser.includes_) {
       // ~0 is assuming that with MSVC-parsed headers, it's ok to always make
       // all backslashes (as some of the slashes will certainly be backslashes
       // anyway). This could be fixed if necessary with some additional
       // complexity in IncludesNormalize::Relativize.
-      deps_nodes->push_back(state_->GetNode(*i, ~0u));
+      deps_nodes->push_back(
+          state_->GetNode(CanonicalPath::MakeFullBackwards(include)));
     }
   } else if (deps_type == "gcc") {
     string depfile = result->edge->GetUnescapedDepfile();
@@ -1004,11 +1004,8 @@ bool Builder::ExtractDeps(CommandRunner::Result* result,
 
     // XXX check depfile matches expected output.
     deps_nodes->reserve(deps.ins_.size());
-    for (vector<StringPiece>::iterator i = deps.ins_.begin();
-         i != deps.ins_.end(); ++i) {
-      uint64_t slash_bits;
-      CanonicalizePath(const_cast<char*>(i->str_), &i->len_, &slash_bits);
-      deps_nodes->push_back(state_->GetNode(*i, slash_bits));
+    for (StringPiece input : deps.ins_) {
+      deps_nodes->push_back(state_->GetNode(CanonicalPath(input.AsString())));
     }
 
     if (!g_keep_depfile) {

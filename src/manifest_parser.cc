@@ -400,14 +400,13 @@ bool ManifestParser::ParseEdge(string* err) {
   // be one of our manifest-specified inputs.
   string dyndep = edge->GetUnescapedDyndep();
   if (!dyndep.empty()) {
-    uint64_t slash_bits;
-    CanonicalizePath(&dyndep, &slash_bits);
-    edge->dyndep_ = state_->GetNode(dyndep, slash_bits);
+    edge->dyndep_ = state_->GetNode(std::move(dyndep));
     edge->dyndep_->set_dyndep_pending(true);
     vector<Node*>::iterator dgi =
       std::find(edge->inputs_.begin(), edge->inputs_.end(), edge->dyndep_);
     if (dgi == edge->inputs_.end()) {
-      return lexer_.Error("dyndep '" + dyndep + "' is not an input", err);
+      return lexer_.Error(
+          "dyndep '" + edge->dyndep_->path() + "' is not an input", err);
     }
     assert(!edge->dyndep_->generated_by_dep_loader());
   }

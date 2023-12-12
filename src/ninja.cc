@@ -171,7 +171,8 @@ struct NinjaMain : public BuildLogUser {
   void DumpMetrics();
 
   virtual bool IsPathDead(StringPiece s) const {
-    Node* n = state_.LookupNode(s);
+    std::string path = s.AsString();
+    Node* n = state_.LookupNode(path);
     if (n && n->in_edge())
       return false;
     // Just checking n isn't enough: If an old output is both in the build log
@@ -184,7 +185,7 @@ struct NinjaMain : public BuildLogUser {
     // Do keep entries around for files which still exist on disk, for
     // generators that want to use this information.
     string err;
-    TimeStamp mtime = disk_interface_.Stat(s.AsString(), &err);
+    TimeStamp mtime = disk_interface_.Stat(path, &err);
     if (mtime == -1)
       Error("%s", err.c_str());  // Log and ignore Stat() errors.
     return mtime == 0;

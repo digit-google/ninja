@@ -694,12 +694,9 @@ bool ImplicitDepLoader::ProcessDepfileDeps(
       PreallocateSpace(edge, depfile_ins->size());
 
   // Add all its in-edges.
-  for (std::vector<StringPiece>::iterator i = depfile_ins->begin();
-       i != depfile_ins->end(); ++i, ++implicit_dep) {
-    uint64_t slash_bits;
-    CanonicalizePath(const_cast<char*>(i->str_), &i->len_, &slash_bits);
-    Node* node = state_->GetNode(*i, slash_bits);
-    *implicit_dep = node;
+  for (const StringPiece& depfile_input : *depfile_ins) {
+    Node* node = state_->GetNode(depfile_input.AsString());
+    *implicit_dep++ = node;
     node->AddOutEdge(edge);
   }
 

@@ -128,8 +128,9 @@ int Cleaner::CleanDead(const BuildLog::Entries& entries) {
   Reset();
   PrintHeader();
   LoadDyndeps();
-  for (BuildLog::Entries::const_iterator i = entries.begin(); i != entries.end(); ++i) {
-    Node* n = state_->LookupNode(i->first);
+  for (const auto& pair : entries) {
+    const StringPiece entry = pair.first;
+    Node* n = state_->LookupNode(entry.str_);
     // Detecting stale outputs works as follows:
     //
     // - If it has no Node, it is not in the build graph, or the deps log
@@ -140,7 +141,7 @@ int Cleaner::CleanDead(const BuildLog::Entries& entries) {
     //   graph.
     //
     if (!n || (!n->in_edge() && n->out_edges().empty())) {
-      Remove(i->first.AsString());
+      Remove(entry.AsString());
     }
   }
   PrintFooter();
