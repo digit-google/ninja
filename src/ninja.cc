@@ -310,17 +310,16 @@ void NinjaMain::ParsePreviousElapsedTimes() {
 }
 
 Node* NinjaMain::CollectTarget(const char* cpath, string* err) {
-  string path = cpath;
-  if (path.empty()) {
+  CanonicalPath canon(cpath);
+  if (canon.value().empty()) {
     *err = "empty path";
     return NULL;
   }
-  uint64_t slash_bits;
-  CanonicalizePath(&path, &slash_bits);
+  std::string path = canon.value();
 
   // Special syntax: "foo.cc^" means "the first output of foo.cc".
   bool first_dependent = false;
-  if (!path.empty() && path[path.size() - 1] == '^') {
+  if (!path.empty() && path.back() == '^') {
     path.resize(path.size() - 1);
     first_dependent = true;
   }
@@ -346,8 +345,7 @@ Node* NinjaMain::CollectTarget(const char* cpath, string* err) {
     }
     return node;
   } else {
-    *err =
-        "unknown target '" + Node::PathDecanonicalized(path, slash_bits) + "'";
+    *err = "unknown target '" + canon.Decanonicalized() + "'";
     if (path == "clean") {
       *err += ", did you mean 'ninja -t clean'?";
     } else if (path == "help") {

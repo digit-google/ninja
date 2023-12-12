@@ -104,6 +104,8 @@ struct State {
 
   Edge* AddEdge(const Rule* rule);
 
+  Node* GetNode(CanonicalPath&& path);
+  Node* GetNode(const CanonicalPath& path);
   Node* GetNode(StringPiece path, uint64_t slash_bits);
   Node* LookupNode(StringPiece path) const;
   Node* SpellcheckNode(const std::string& path);

@@ -93,11 +93,29 @@ Edge* State::AddEdge(const Rule* rule) {
   return edge;
 }
 
+Node* State::GetNode(CanonicalPath&& path) {
+  Node* node = LookupNode(path.value());
+  if (node)
+    return node;
+  node = new Node(std::move(path));
+  paths_[node->path()] = node;
+  return node;
+}
+
+Node* State::GetNode(const CanonicalPath& path) {
+  Node* node = LookupNode(path.value());
+  if (node)
+    return node;
+  node = new Node(path);
+  paths_[node->path()] = node;
+  return node;
+}
+
 Node* State::GetNode(StringPiece path, uint64_t slash_bits) {
   Node* node = LookupNode(path);
   if (node)
     return node;
-  node = new Node(path.AsString(), slash_bits);
+  node = new Node(CanonicalPath::MakeRaw(path, slash_bits));
   paths_[node->path()] = node;
   return node;
 }

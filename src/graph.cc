@@ -32,7 +32,7 @@
 using namespace std;
 
 bool Node::Stat(DiskInterface* disk_interface, string* err) {
-  mtime_ = disk_interface->Stat(path_, err);
+  mtime_ = disk_interface->Stat(path_.value(), err);
   if (mtime_ == -1) {
     return false;
   }
@@ -572,21 +572,6 @@ bool Edge::maybe_phonycycle_diagnostic() const {
   // "phonycycle" diagnostic option to the form it used.
   return is_phony() && outputs_.size() == 1 && implicit_outs_ == 0 &&
       implicit_deps_ == 0;
-}
-
-// static
-string Node::PathDecanonicalized(const string& path, uint64_t slash_bits) {
-  string result = path;
-#ifdef _WIN32
-  uint64_t mask = 1;
-  for (char* c = &result[0]; (c = strchr(c, '/')) != NULL;) {
-    if (slash_bits & mask)
-      *c = '\\';
-    c++;
-    mask <<= 1;
-  }
-#endif
-  return result;
 }
 
 void Node::Dump(const char* prefix) const {

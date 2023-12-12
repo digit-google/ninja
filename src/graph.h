@@ -21,6 +21,7 @@
 #include <string>
 #include <vector>
 
+#include "canonical_path.h"
 #include "dyndep.h"
 #include "eval_env.h"
 #include "explanations.h"
@@ -39,8 +40,7 @@ struct State;
 /// Information about a node in the dependency graph: the file, whether
 /// it's dirty, mtime, etc.
 struct Node {
-  Node(const std::string& path, uint64_t slash_bits)
-      : path_(path), slash_bits_(slash_bits) {}
+  Node(CanonicalPath path) : path_(std::move(path)) {}
 
   /// Return false on error.
   bool Stat(DiskInterface* disk_interface, std::string* err);
@@ -78,14 +78,10 @@ struct Node {
     return exists_ != ExistenceStatusUnknown;
   }
 
-  const std::string& path() const { return path_; }
+  const std::string& path() const { return path_.value(); }
   /// Get |path()| but use slash_bits to convert back to original slash styles.
-  std::string PathDecanonicalized() const {
-    return PathDecanonicalized(path_, slash_bits_);
-  }
-  static std::string PathDecanonicalized(const std::string& path,
-                                         uint64_t slash_bits);
-  uint64_t slash_bits() const { return slash_bits_; }
+  std::string PathDecanonicalized() const { return path_.Decanonicalized(); }
+  uint64_t slash_bits() const { return path_.slash_bits(); }
 
   TimeStamp mtime() const { return mtime_; }
 
@@ -118,11 +114,7 @@ struct Node {
   void Dump(const char* prefix="") const;
 
 private:
-  std::string path_;
-
-  /// Set bits starting from lowest for backslashes that were normalized to
-  /// forward slashes by CanonicalizePath. See |PathDecanonicalized|.
-  uint64_t slash_bits_ = 0;
+  CanonicalPath path_;
 
   /// Possible values of mtime_:
   ///   -1: file hasn't been examined
