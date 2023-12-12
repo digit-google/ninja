@@ -106,7 +106,6 @@ struct State {
 
   Node* GetNode(CanonicalPath&& path);
   Node* GetNode(const CanonicalPath& path);
-  Node* GetNode(StringPiece path, uint64_t slash_bits);
   Node* GetNodeForTest(StringPiece path);  // For tests only.
   Node* LookupNode(const char* path) const;
   Node* LookupNode(const CanonicalPath& path) const;
@@ -115,10 +114,10 @@ struct State {
   /// Add input / output / validation nodes to a given edge. This also
   /// ensures that the generated_by_dep_loader() flag for all these nodes
   /// is set to false, to indicate that they come from the input manifest.
-  void AddIn(Edge* edge, StringPiece path, uint64_t slash_bits);
-  bool AddOut(Edge* edge, StringPiece path, uint64_t slash_bits, std::string* err);
-  void AddValidation(Edge* edge, StringPiece path, uint64_t slash_bits);
-  bool AddDefault(StringPiece path, std::string* error);
+  void AddIn(Edge* edge, CanonicalPath path);
+  bool AddOut(Edge* edge, CanonicalPath path, std::string* err);
+  void AddValidation(Edge* edge, CanonicalPath path);
+  bool AddDefault(const CanonicalPath& path, std::string* error);
 
   /// Reset state.  Keeps all nodes and edges, but restores them to the
   /// state where we haven't yet examined the disk for dirty state.

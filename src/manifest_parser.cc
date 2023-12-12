@@ -194,10 +194,8 @@ bool ManifestParser::ParseDefault(string* err) {
     string path = eval.Evaluate(env_);
     if (path.empty())
       return lexer_.Error("empty path", err);
-    uint64_t slash_bits;  // Unused because this only does lookup.
-    CanonicalizePath(&path, &slash_bits);
     std::string default_err;
-    if (!state_->AddDefault(path, &default_err))
+    if (!state_->AddDefault(CanonicalPath(std::move(path)), &default_err))
       return lexer_.Error(default_err, err);
 
     eval.Clear();
@@ -334,9 +332,7 @@ bool ManifestParser::ParseEdge(string* err) {
     string path = outs[i].Evaluate(env);
     if (path.empty())
       return lexer_.Error("empty path", err);
-    uint64_t slash_bits;
-    CanonicalizePath(&path, &slash_bits);
-    if (!state_->AddOut(edge, path, slash_bits, err)) {
+    if (!state_->AddOut(edge, CanonicalPath(std::move(path)), err)) {
       lexer_.Error(std::string(*err), err);
       return false;
     }
@@ -356,9 +352,7 @@ bool ManifestParser::ParseEdge(string* err) {
     string path = i->Evaluate(env);
     if (path.empty())
       return lexer_.Error("empty path", err);
-    uint64_t slash_bits;
-    CanonicalizePath(&path, &slash_bits);
-    state_->AddIn(edge, path, slash_bits);
+    state_->AddIn(edge, CanonicalPath(std::move(path)));
   }
   edge->implicit_deps_ = implicit;
   edge->order_only_deps_ = order_only;
@@ -369,9 +363,7 @@ bool ManifestParser::ParseEdge(string* err) {
     string path = v->Evaluate(env);
     if (path.empty())
       return lexer_.Error("empty path", err);
-    uint64_t slash_bits;
-    CanonicalizePath(&path, &slash_bits);
-    state_->AddValidation(edge, path, slash_bits);
+    state_->AddValidation(edge, CanonicalPath(std::move(path)));
   }
 
   if (options_.phony_cycle_action_ == kPhonyCycleActionWarn &&
