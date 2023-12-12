@@ -1955,7 +1955,7 @@ TEST_F(BuildWithLogTest, RestatInputChangesDueToRule) {
   // mtime
   EXPECT_TRUE(builder_.AddTarget("out1", &err));
   ASSERT_EQ("", err);
-  EXPECT_TRUE(!state_.GetNode("out1", 0)->dirty());
+  EXPECT_TRUE(!state_.GetNodeForTest("out1")->dirty());
   EXPECT_TRUE(builder_.Build(&err));
   ASSERT_EQ("", err);
   EXPECT_EQ(1u, command_runner_.commands_ran_.size());
@@ -3042,7 +3042,7 @@ TEST_F(BuildWithDepsLogTest, DepFileOKDepsLog) {
 
     Edge* edge = state.edges_.back();
 
-    state.GetNode("bar.h", 0)->MarkDirty();  // Mark bar.h as missing.
+    state.GetNodeForTest("bar.h")->MarkDirty();  // Mark bar.h as missing.
     EXPECT_TRUE(builder.AddTarget("fo o.o", &err));
     ASSERT_EQ("", err);
 
@@ -3188,7 +3188,7 @@ TEST_F(BuildWithDepsLogTest, DepFileDepsLogCanonicalize) {
     Builder builder(&state, config_, NULL, &deps_log, &fs_, &status_, 0);
     builder.command_runner_.reset(&command_runner_);
 
-    state.GetNode("bar.h", 0)->MarkDirty();  // Mark bar.h as missing.
+    state.GetNodeForTest("bar.h")->MarkDirty();  // Mark bar.h as missing.
     EXPECT_TRUE(builder.AddTarget("a/b/c/d/e/fo o.o", &err));
     ASSERT_EQ("", err);
 

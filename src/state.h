@@ -107,6 +107,7 @@ struct State {
   Node* GetNode(CanonicalPath&& path);
   Node* GetNode(const CanonicalPath& path);
   Node* GetNode(StringPiece path, uint64_t slash_bits);
+  Node* GetNodeForTest(StringPiece path);  // For tests only.
   Node* LookupNode(StringPiece path) const;
   Node* SpellcheckNode(const std::string& path);
 
