@@ -127,6 +127,7 @@ check_platform_supports_browse_mode(platform_supports_ninja_browse)
 add_library(libninja OBJECT
 	src/build_log.cc
 	src/build.cc
+	src/canonical_path.cc
 	src/clean.cc
 	src/clparser.cc
 	src/dyndep.cc
@@ -267,6 +268,7 @@ if(BUILD_TESTING)
   add_executable(ninja_test
     src/build_log_test.cc
     src/build_test.cc
+    src/canonical_path_test.cc
     src/clean_test.cc
     src/clparser_test.cc
     src/depfile_parser_test.cc

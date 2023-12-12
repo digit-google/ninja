@@ -531,6 +531,7 @@ n.comment('Core source files all build into ninja library.')
 objs.extend(re2c_objs)
 for name in ['build',
              'build_log',
+             'canonical_path',
              'clean',
              'clparser',
              'debug_flags',
