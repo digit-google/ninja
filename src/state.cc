@@ -111,15 +111,6 @@ Node* State::GetNode(const CanonicalPath& path) {
   return node;
 }
 
-Node* State::GetNode(StringPiece path, uint64_t slash_bits) {
-  Node* node = LookupNode(path.AsString());
-  if (node)
-    return node;
-  node = new Node(CanonicalPath::MakeRaw(path, slash_bits));
-  paths_[node->path()] = node;
-  return node;
-}
-
 Node* State::GetNodeForTest(StringPiece path) {
   return GetNode(CanonicalPath(path.AsString()));
 }
@@ -155,21 +146,20 @@ Node* State::SpellcheckNode(const string& path) {
   return result;
 }
 
-void State::AddIn(Edge* edge, StringPiece path, uint64_t slash_bits) {
-  Node* node = GetNode(path, slash_bits);
+void State::AddIn(Edge* edge, CanonicalPath path) {
+  Node* node = GetNode(std::move(path));
   node->set_generated_by_dep_loader(false);
   edge->inputs_.push_back(node);
   node->AddOutEdge(edge);
 }
 
-bool State::AddOut(Edge* edge, StringPiece path, uint64_t slash_bits,
-                   std::string* err) {
-  Node* node = GetNode(path, slash_bits);
+bool State::AddOut(Edge* edge, CanonicalPath path, std::string* err) {
+  Node* node = GetNode(std::move(path));
   if (Edge* other = node->in_edge()) {
     if (other == edge) {
-      *err = path.AsString() + " is defined as an output multiple times";
+      *err = node->path() + " is defined as an output multiple times";
     } else {
-      *err = "multiple rules generate " + path.AsString();
+      *err = "multiple rules generate " + node->path();
     }
     return false;
   }
@@ -179,17 +169,17 @@ bool State::AddOut(Edge* edge, StringPiece path, uint64_t slash_bits,
   return true;
 }
 
-void State::AddValidation(Edge* edge, StringPiece path, uint64_t slash_bits) {
-  Node* node = GetNode(path, slash_bits);
+void State::AddValidation(Edge* edge, CanonicalPath path) {
+  Node* node = GetNode(std::move(path));
   edge->validations_.push_back(node);
   node->AddValidationOutEdge(edge);
   node->set_generated_by_dep_loader(false);
 }
 
-bool State::AddDefault(StringPiece path, string* err) {
-  Node* node = LookupNode(path.AsString());
+bool State::AddDefault(const CanonicalPath& path, string* err) {
+  Node* node = LookupNode(path);
   if (!node) {
-    *err = "unknown target '" + path.AsString() + "'";
+    *err = "unknown target '" + path.value() + "'";
     return false;
   }
   defaults_.push_back(node);
