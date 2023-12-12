@@ -120,6 +120,10 @@ Node* State::GetNode(StringPiece path, uint64_t slash_bits) {
   return node;
 }
 
+Node* State::GetNodeForTest(StringPiece path) {
+  return GetNode(CanonicalPath(path.AsString()));
+}
+
 Node* State::LookupNode(StringPiece path) const {
   Paths::const_iterator i = paths_.find(path);
   if (i != paths_.end())
