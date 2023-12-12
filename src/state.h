@@ -108,7 +108,8 @@ struct State {
   Node* GetNode(const CanonicalPath& path);
   Node* GetNode(StringPiece path, uint64_t slash_bits);
   Node* GetNodeForTest(StringPiece path);  // For tests only.
-  Node* LookupNode(StringPiece path) const;
+  Node* LookupNode(const char* path) const;
+  Node* LookupNode(const CanonicalPath& path) const;
   Node* SpellcheckNode(const std::string& path);
 
   /// Add input / output / validation nodes to a given edge. This also

@@ -112,7 +112,7 @@ Node* State::GetNode(const CanonicalPath& path) {
 }
 
 Node* State::GetNode(StringPiece path, uint64_t slash_bits) {
-  Node* node = LookupNode(path);
+  Node* node = LookupNode(path.AsString());
   if (node)
     return node;
   node = new Node(CanonicalPath::MakeRaw(path, slash_bits));
@@ -124,8 +124,15 @@ Node* State::GetNodeForTest(StringPiece path) {
   return GetNode(CanonicalPath(path.AsString()));
 }
 
-Node* State::LookupNode(StringPiece path) const {
-  Paths::const_iterator i = paths_.find(path);
+Node* State::LookupNode(const char* path) const {
+  Paths::const_iterator i = paths_.find(StringPiece(path));
+  if (i != paths_.end())
+    return i->second;
+  return NULL;
+}
+
+Node* State::LookupNode(const CanonicalPath& path) const {
+  Paths::const_iterator i = paths_.find(path.value());
   if (i != paths_.end())
     return i->second;
   return NULL;
@@ -180,7 +187,7 @@ void State::AddValidation(Edge* edge, StringPiece path, uint64_t slash_bits) {
 }
 
 bool State::AddDefault(StringPiece path, string* err) {
-  Node* node = LookupNode(path);
+  Node* node = LookupNode(path.AsString());
   if (!node) {
     *err = "unknown target '" + path.AsString() + "'";
     return false;
