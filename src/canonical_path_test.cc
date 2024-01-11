@@ -132,6 +132,9 @@ TEST(CanonicalPath, PathSamples) {
 
   path = CanonicalPath("foo/..");
   EXPECT_EQ(".", path.value());
+
+  path = CanonicalPath("foo/.._bar");
+  EXPECT_EQ("foo/.._bar", path.value());
 }
 
 #ifdef _WIN32

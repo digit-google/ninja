@@ -39,8 +39,7 @@ class CanonicalPath {
   /// in the instance. Use value() and slash_bits() to retrieve the result
   /// of canonicalization.
   ///
-  /// This is non-explicit intentionally, to allow automatic conversion from
-  /// std::string and C string literal values automatically.
+  /// This is non-explicit intentionally.
   CanonicalPath(std::string&& path);
   CanonicalPath(const std::string& path);
   CanonicalPath(const char* path);
