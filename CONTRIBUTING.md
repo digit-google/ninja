@@ -21,9 +21,9 @@ a few additions:
 * Use `///` for [Doxygen](http://www.doxygen.nl/) (use `\a` to refer to
   arguments).
 * It's not necessary to document each argument, especially when they're
-  relatively self-evident (e.g. in
-  `CanonicalizePath(string* path, string* err)`, the arguments are hopefully
-  obvious).
+  relatively self-evident. (e.g. in
+  `GetShellEscapedString(const std::string& input, std::string* result)`, the
+  arguments are hopefully obvious).
 
 If you're unsure about code formatting, please use
 [clang-format](https://clang.llvm.org/docs/ClangFormat.html). However, please do

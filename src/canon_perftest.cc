@@ -15,7 +15,7 @@
 #include <stdio.h>
 #include <string.h>
 
-#include "util.h"
+#include "canonical_path.h"
 #include "metrics.h"
 
 using namespace std;
@@ -27,16 +27,12 @@ const char kPath[] =
 int main() {
   vector<int> times;
 
-  char buf[200];
-  size_t len = strlen(kPath);
-  strcpy(buf, kPath);
-
   for (int j = 0; j < 5; ++j) {
     const int kNumRepetitions = 2000000;
     int64_t start = GetTimeMillis();
-    uint64_t slash_bits;
     for (int i = 0; i < kNumRepetitions; ++i) {
-      CanonicalizePath(buf, &len, &slash_bits);
+      CanonicalPath path(kPath);
+      (void)path;
     }
     int delta = (int)(GetTimeMillis() - start);
     times.push_back(delta);
