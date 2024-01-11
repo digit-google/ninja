@@ -268,9 +268,7 @@ bool NinjaMain::RebuildManifest(const char* input_file, string* err,
     *err = "empty path";
     return false;
   }
-  uint64_t slash_bits;  // Unused because this path is only used for lookup.
-  CanonicalizePath(&path, &slash_bits);
-  Node* node = state_.LookupNode(path);
+  Node* node = state_.LookupNode(CanonicalPath(path));
   if (!node)
     return false;
 

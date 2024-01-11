@@ -12,17 +12,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include "includes_normalize.h"
-
-#include "string_piece.h"
-#include "string_piece_util.h"
-#include "util.h"
+#include <windows.h>
 
 #include <algorithm>
 #include <iterator>
 #include <sstream>
 
-#include <windows.h>
+#include "canonical_path.h"
+#include "includes_normalize.h"
+#include "string_piece.h"
+#include "string_piece_util.h"
+#include "util.h"
 
 using namespace std;
 
@@ -183,24 +183,15 @@ string IncludesNormalize::Relativize(
 
 bool IncludesNormalize::Normalize(const string& input,
                                   string* result, string* err) const {
-  char copy[_MAX_PATH + 1];
-  size_t len = input.size();
-  if (len > _MAX_PATH) {
-    *err = "path too long";
-    return false;
-  }
-  strncpy(copy, input.c_str(), input.size() + 1);
-  uint64_t slash_bits;
-  CanonicalizePath(copy, &len, &slash_bits);
-  StringPiece partially_fixed(copy, len);
-  string abs_input = AbsPath(partially_fixed, err);
+  std::string partially_fixed = CanonicalPath(input).value();
+  std::string abs_input = AbsPath(partially_fixed, err);
   if (!err->empty())
     return false;
 
   if (!SameDrive(abs_input, relative_to_, err)) {
     if (!err->empty())
       return false;
-    *result = partially_fixed.AsString();
+    *result = std::move(partially_fixed);
     return true;
   }
   *result = Relativize(abs_input, split_relative_to_, err);

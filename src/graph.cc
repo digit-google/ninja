@@ -611,17 +611,6 @@ bool ImplicitDepLoader::LoadDeps(Edge* edge, string* err) {
   return true;
 }
 
-struct matches {
-  explicit matches(std::vector<StringPiece>::iterator i) : i_(i) {}
-
-  bool operator()(const Node* node) const {
-    StringPiece opath = StringPiece(node->path());
-    return *i_ == opath;
-  }
-
-  std::vector<StringPiece>::iterator i_;
-};
-
 bool ImplicitDepLoader::LoadDepFile(Edge* edge, const string& path,
                                     string* err) {
   METRIC_RECORD("depfile load");
@@ -659,27 +648,28 @@ bool ImplicitDepLoader::LoadDepFile(Edge* edge, const string& path,
   }
 
   uint64_t unused;
-  std::vector<StringPiece>::iterator primary_out = depfile.outs_.begin();
-  CanonicalizePath(const_cast<char*>(primary_out->str_), &primary_out->len_,
-                   &unused);
+  std::string primary_out =
+      CanonicalPath(depfile.outs_.front().AsString()).value();
 
   // Check that this depfile matches the edge's output, if not return false to
   // mark the edge as dirty.
-  StringPiece opath = StringPiece(first_output->path());
-  if (opath != *primary_out) {
-    explanations_.Record(first_output,
-                         "expected depfile '%s' to mention '%s', got '%s'",
-                         path.c_str(), first_output->path().c_str(),
-                         primary_out->AsString().c_str());
+  if (first_output->path() != primary_out) {
+    explanations_.Record(
+        first_output, "expected depfile '%s' to mention '%s', got '%s'",
+        path.c_str(), first_output->path().c_str(), primary_out.c_str());
     return false;
   }
 
-  // Ensure that all mentioned outputs are outputs of the edge.
-  for (std::vector<StringPiece>::iterator o = depfile.outs_.begin();
-       o != depfile.outs_.end(); ++o) {
-    matches m(o);
-    if (std::find_if(edge->outputs_.begin(), edge->outputs_.end(), m) == edge->outputs_.end()) {
-      *err = path + ": depfile mentions '" + o->AsString() + "' as an output, but no such output was declared";
+  for (StringPiece out : depfile.outs_) {
+    const std::string& out_path = CanonicalPath(out.AsString()).value();
+    auto matches = [&out_path](const Node* node) -> bool {
+      return node->path() == out_path;
+    };
+
+    if (std::find_if(edge->outputs_.begin(), edge->outputs_.end(), matches) ==
+        edge->outputs_.end()) {
+      *err = path + ": depfile mentions '" + out_path +
+             "' as an output, but no such output was declared";
       return false;
     }
   }

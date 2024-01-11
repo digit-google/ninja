@@ -25,7 +25,7 @@
 #include "includes_normalize.h"
 #include "string_piece.h"
 #else
-#include "util.h"
+#include "canonical_path.h"
 #endif
 
 using namespace std;
@@ -98,15 +98,13 @@ bool CLParser::Parse(const string& output, const string& deps_prefix,
     string include = FilterShowIncludes(line, deps_prefix);
     if (!include.empty()) {
       seen_show_includes = true;
-      string normalized;
 #ifdef _WIN32
+      std::string normalized;
       if (!normalizer.Normalize(include, &normalized, err))
         return false;
 #else
       // TODO: should this make the path relative to cwd?
-      normalized = include;
-      uint64_t slash_bits;
-      CanonicalizePath(&normalized, &slash_bits);
+      std::string normalized = CanonicalPath(std::move(include)).value();
 #endif
       if (!IsSystemInclude(normalized))
         includes_.insert(normalized);

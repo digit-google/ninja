@@ -205,15 +205,14 @@ int Cleaner::CleanTargets(int target_count, char* targets[]) {
       status_ = 1;
       continue;
     }
-    uint64_t slash_bits;
-    CanonicalizePath(&target_name, &slash_bits);
+    CanonicalPath canon(std::move(target_name));
     Node* target = state_->LookupNode(target_name);
     if (target) {
       if (IsVerbose())
-        printf("Target %s\n", target_name.c_str());
+        printf("Target %s\n", canon.value().c_str());
       DoCleanTarget(target);
     } else {
-      Error("unknown target '%s'", target_name.c_str());
+      Error("unknown target '%s'", canon.value().c_str());
       status_ = 1;
     }
   }
