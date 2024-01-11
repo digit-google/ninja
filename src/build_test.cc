@@ -1224,10 +1224,10 @@ TEST_F(BuildTest, DepFileCanonicalize) {
   EXPECT_TRUE(builder_.AddTarget("gen/stuff/things/foo.o", &err));
   ASSERT_EQ("", err);
   ASSERT_EQ(1u, fs_.files_read_.size());
-  // The depfile path does not get Canonicalize as it seems unnecessary.
+  // The depfile path is not canonicalized.
   EXPECT_EQ("gen/stuff\\things/foo.o.d", fs_.files_read_[0]);
 
-  // Expect one new edge enerating foo.o.
+  // Expect one new edge generating foo.o.
   ASSERT_EQ(orig_edges + 1, (int)state_.edges_.size());
   // Expect our edge to now have three inputs: foo.c and two headers.
   Edge* edge = state_.edges_.back();

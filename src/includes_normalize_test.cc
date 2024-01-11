@@ -106,13 +106,9 @@ TEST(IncludesNormalize, LongInvalidPath) {
       "pdb (for example, mspdb110.dll) could not be found on your path. This "
       "is usually a configuration error. Compilation will continue using /Z7 "
       "instead of /Zi, but expect a similar error when you link your program.";
-  // Too long, won't be canonicalized. Ensure doesn't crash.
   string result, err;
   IncludesNormalize normalizer(".");
-  EXPECT_FALSE(
-      normalizer.Normalize(kLongInputString, &result, &err));
-  EXPECT_EQ("path too long", err);
-
+  EXPECT_TRUE(normalizer.Normalize(kLongInputString, &result, &err));
 
   // Construct max size path having cwd prefix.
   // kExactlyMaxPath = "$cwd\\a\\aaaa...aaaa\0";
