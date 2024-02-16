@@ -109,22 +109,22 @@ std::string ElideMiddle(const std::string& str, size_t width);
 /// Truncates a file to the given size.
 bool Truncate(const std::string& path, size_t size, std::string* err);
 
-#ifdef _MSC_VER
+#ifdef _WIN32
 #define snprintf _snprintf
 #define fileno _fileno
 #define unlink _unlink
 #define chdir _chdir
 #define strtoull _strtoui64
 #define getcwd _getcwd
+#ifndef PATH_MAX
 #define PATH_MAX _MAX_PATH
 #endif
 
-#ifdef _WIN32
 /// Convert the value returned by GetLastError() into a string.
 std::string GetLastErrorString();
 
 /// Calls Fatal() with a function name and GetLastErrorString.
 NORETURN void Win32Fatal(const char* function, const char* hint = NULL);
-#endif
+#endif  // !_WIN32
 
 #endif  // NINJA_UTIL_H_
