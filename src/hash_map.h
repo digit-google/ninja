@@ -26,7 +26,7 @@ unsigned int MurmurHash2(const void* key, size_t len) {
   static const unsigned int seed = 0xDECAFBAD;
   const unsigned int m = 0x5bd1e995;
   const int r = 24;
-  unsigned int h = seed ^ len;
+  unsigned int h = seed ^ static_cast<unsigned int>(len);
   const unsigned char* data = static_cast<const unsigned char*>(key);
   while (len >= 4) {
     unsigned int k;

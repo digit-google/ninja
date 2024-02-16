@@ -399,12 +399,13 @@ struct EdgeEnv : public Env {
 
 string EdgeEnv::LookupVariable(const string& var) {
   if (var == "in" || var == "in_newline") {
-    int explicit_deps_count = edge_->inputs_.size() - edge_->implicit_deps_ -
-      edge_->order_only_deps_;
+    int explicit_deps_count = static_cast<int>(edge_->inputs_.size()) -
+                              edge_->implicit_deps_ - edge_->order_only_deps_;
     return MakePathList(edge_->inputs_.data(), explicit_deps_count,
                         var == "in" ? ' ' : '\n');
   } else if (var == "out") {
-    int explicit_outs_count = edge_->outputs_.size() - edge_->implicit_outs_;
+    int explicit_outs_count =
+        static_cast<int>(edge_->outputs_.size()) - edge_->implicit_outs_;
     return MakePathList(&edge_->outputs_[0], explicit_outs_count, ' ');
   }
 
@@ -689,6 +690,7 @@ bool ImplicitDepLoader::LoadDepFile(Edge* edge, const string& path,
   std::vector<StringPiece>::iterator primary_out = depfile.outs_.begin();
   CanonicalizePath(const_cast<char*>(primary_out->str_), &primary_out->len_,
                    &unused);
+  (void)unused;
 
   // Check that this depfile matches the edge's output, if not return false to
   // mark the edge as dirty.
@@ -717,7 +719,7 @@ bool ImplicitDepLoader::ProcessDepfileDeps(
     Edge* edge, std::vector<StringPiece>* depfile_ins, std::string* err) {
   // Preallocate space in edge->inputs_ to be filled in below.
   vector<Node*>::iterator implicit_dep =
-      PreallocateSpace(edge, depfile_ins->size());
+      PreallocateSpace(edge, static_cast<int>(depfile_ins->size()));
 
   // Add all its in-edges.
   for (std::vector<StringPiece>::iterator i = depfile_ins->begin();

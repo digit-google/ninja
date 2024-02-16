@@ -59,7 +59,7 @@ bool DepsLog::OpenForWrite(const string& path, string* err) {
 
 bool DepsLog::RecordDeps(Node* node, TimeStamp mtime,
                          const vector<Node*>& nodes) {
-  return RecordDeps(node, mtime, nodes.size(),
+  return RecordDeps(node, mtime, static_cast<int>(nodes.size()),
                     nodes.empty() ? NULL : const_cast<Node**>(&nodes.front()));
 }
 
@@ -243,7 +243,7 @@ LoadStatus DepsLog::Load(const string& path, State* state, string* err) {
       // dependency record entry.)
       unsigned checksum = *reinterpret_cast<unsigned*>(buf + size - 4);
       int expected_id = ~checksum;
-      int id = nodes_.size();
+      int id = static_cast<int>(nodes_.size());
       if (id != expected_id) {
         read_failed = true;
         break;
@@ -383,7 +383,7 @@ bool DepsLog::UpdateDeps(int out_id, Deps* deps) {
 }
 
 bool DepsLog::RecordId(Node* node) {
-  int path_size = node->path().size();
+  int path_size = static_cast<int>(node->path().size());
   int padding = (4 - path_size % 4) % 4;  // Pad path to 4 byte boundary.
 
   unsigned size = path_size + padding + 4;
@@ -403,7 +403,7 @@ bool DepsLog::RecordId(Node* node) {
   }
   if (padding && fwrite("\0\0", padding, 1, file_) < 1)
     return false;
-  int id = nodes_.size();
+  int id = static_cast<int>(nodes_.size());
   unsigned checksum = ~(unsigned)id;
   if (fwrite(&checksum, 4, 1, file_) < 1)
     return false;

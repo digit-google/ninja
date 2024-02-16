@@ -35,8 +35,8 @@ int EditDistance(const StringPiece& s1,
   // only the entries to the left, top, and top-left are needed.  The left
   // entry is in row[x-1], the top entry is what's in row[x] from the last
   // iteration, and the top-left entry is stored in previous.
-  int m = s1.len_;
-  int n = s2.len_;
+  int m = static_cast<int>(s1.len_);
+  int n = static_cast<int>(s2.len_);
 
   vector<int> row(n + 1);
   for (int i = 1; i <= n; ++i)
