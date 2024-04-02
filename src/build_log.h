@@ -20,6 +20,7 @@
 #include <memory>
 #include <string>
 
+#include "disk_interface.h"
 #include "hash_map.h"
 #include "load_status.h"
 #include "timestamp.h"
@@ -43,8 +44,15 @@ struct BuildLogUser {
 /// 2) timing information, perhaps for generating reports
 /// 3) restat information
 struct BuildLog {
-  BuildLog();
+  /// Constructor takes a reference to an existing DiskInterface instance.
+  BuildLog(DiskInterface& disk_interface);
+
+  /// Destructor.
   ~BuildLog();
+
+  /// Move operations are allowed.
+  BuildLog(BuildLog&&) noexcept;
+  BuildLog& operator=(BuildLog&&) noexcept;
 
   /// Prepares writing to the log file without actually opening it - that will
   /// happen when/if it's needed
@@ -89,17 +97,21 @@ struct BuildLog {
                  std::string* err);
 
   /// Restat all outputs in the log
-  bool Restat(StringPiece path, const DiskInterface& disk_interface,
-              int output_count, char** outputs, std::string* err);
+  bool Restat(StringPiece path, int output_count, char** outputs,
+              std::string* err);
 
   typedef ExternalStringHashMap<std::unique_ptr<LogEntry>>::Type Entries;
   const Entries& entries() const { return entries_; }
 
  private:
+  /// Default constructor is private and never implemented.
+  BuildLog() = delete;
+
   /// Should be called before using log_file_. When false is returned, errno
   /// will be set.
   bool OpenForWriteIfNeeded();
 
+  DiskInterface* disk_interface_ = nullptr;
   Entries entries_;
   FILE* log_file_ = nullptr;
   std::string log_file_path_;

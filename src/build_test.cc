@@ -206,9 +206,9 @@ void PlanTest::TestPoolWithDepthOne(const char* test_case) {
   GetNode("out1")->MarkDirty();
   GetNode("out2")->MarkDirty();
   string err;
-  EXPECT_TRUE(plan_.AddTarget(GetNode("out1"), &err));
+  EXPECT_TRUE(plan_.AddTarget(GetNode("out1"), &err)) << err;
   ASSERT_EQ("", err);
-  EXPECT_TRUE(plan_.AddTarget(GetNode("out2"), &err));
+  EXPECT_TRUE(plan_.AddTarget(GetNode("out2"), &err)) << err;
   ASSERT_EQ("", err);
   plan_.PrepareQueue();
   ASSERT_TRUE(plan_.more_to_do());
@@ -491,7 +491,9 @@ TEST_F(PlanTest, PriorityWithoutBuildLog) {
   GetNode("b0")->MarkDirty();
   GetNode("c0")->MarkDirty();
   GetNode("out")->MarkDirty();
-  BuildLog log;
+
+  SystemDiskInterface disk_interface;
+  BuildLog log(disk_interface);
   PrepareForTarget("out", &log);
 
   EXPECT_EQ(GetNode("out")->in_edge()->critical_path_weight(), 1);
@@ -606,7 +608,8 @@ void BuildTest::RebuildTarget(const string& target, const char* manifest,
   AssertParse(pstate, manifest);
 
   string err;
-  BuildLog build_log, *pbuild_log = NULL;
+  SystemDiskInterface disk_interface;
+  BuildLog build_log(disk_interface), *pbuild_log = NULL;
   if (log_path) {
     ASSERT_TRUE(build_log.Load(log_path, &err));
     ASSERT_TRUE(build_log.OpenForWrite(log_path, *this, &err));
@@ -1554,7 +1557,8 @@ struct BuildWithLogTest : public BuildTest {
     builder_.SetBuildLog(&build_log_);
   }
 
-  BuildLog build_log_;
+  SystemDiskInterface disk_interface_;
+  BuildLog build_log_{ disk_interface_ };
 };
 
 TEST_F(BuildWithLogTest, ImplicitGeneratedOutOfDate) {
@@ -2754,9 +2758,11 @@ TEST_F(BuildWithDepsLogTest, TestInputMtimeRaceCondition) {
   ASSERT_NO_FATAL_FAILURE(AddCatRule(&state));
   ASSERT_NO_FATAL_FAILURE(AssertParse(&state, manifest));
 
-  BuildLog build_log;
-  ASSERT_TRUE(build_log.Load(build_log_file_.path(), &err));
-  ASSERT_TRUE(build_log.OpenForWrite(build_log_file_.path(), *this, &err));
+  SystemDiskInterface disk_interface;
+  BuildLog build_log(disk_interface);
+  ASSERT_TRUE(build_log.Load(build_log_file_.path(), &err)) << err;
+  ASSERT_TRUE(build_log.OpenForWrite(build_log_file_.path(), *this, &err))
+      << err;
 
   DepsLog deps_log;
   ASSERT_TRUE(deps_log.Load(deps_log_file_.path(), &state, &err));
@@ -2834,7 +2840,8 @@ TEST_F(BuildWithDepsLogTest, TestInputMtimeRaceConditionWithDepFile) {
   State state;
   ASSERT_NO_FATAL_FAILURE(AssertParse(&state, manifest));
 
-  BuildLog build_log;
+  SystemDiskInterface disk_interface;
+  BuildLog build_log(disk_interface);
   ASSERT_TRUE(build_log.Load(build_log_file_.path(), &err));
   ASSERT_TRUE(build_log.OpenForWrite(build_log_file_.path(), *this, &err));
 
@@ -3102,7 +3109,8 @@ TEST_F(BuildWithDepsLogTest, DiscoveredDepDuringBuildChanged) {
   fs_.Create("in1", "");
   fs_.Tick();
 
-  BuildLog build_log;
+  SystemDiskInterface disk_interface;
+  BuildLog build_log(disk_interface);
 
   {
     State state;

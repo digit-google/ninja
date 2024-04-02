@@ -21,12 +21,12 @@
 #endif
 
 #include "build_log.h"
-#include "disk_interface.h"
 
-#include <cassert>
 #include <errno.h>
 #include <stdlib.h>
 #include <string.h>
+
+#include <cassert>
 
 #ifndef _WIN32
 #include <inttypes.h>
@@ -68,11 +68,15 @@ BuildLog::LogEntry::LogEntry(const std::string& output, uint64_t command_hash,
     : output(output), command_hash(command_hash), start_time(start_time),
       end_time(end_time), mtime(mtime) {}
 
-BuildLog::BuildLog() = default;
+BuildLog::BuildLog(DiskInterface& disk_interface)
+    : disk_interface_(&disk_interface) {}
 
 BuildLog::~BuildLog() {
   Close();
 }
+
+BuildLog::BuildLog(BuildLog&&) noexcept = default;
+BuildLog& BuildLog::operator=(BuildLog&&) noexcept = default;
 
 bool BuildLog::OpenForWrite(const std::string& path, const BuildLogUser& user,
                             std::string* err) {
@@ -133,7 +137,7 @@ bool BuildLog::OpenForWriteIfNeeded() {
   if (log_file_ || log_file_path_.empty()) {
     return true;
   }
-  log_file_ = fopen(log_file_path_.c_str(), "ab");
+  log_file_ = disk_interface_->OpenFile(log_file_path_, "ab");
   if (!log_file_) {
     return false;
   }
@@ -207,7 +211,7 @@ struct LineReader {
 
 LoadStatus BuildLog::Load(const std::string& path, std::string* err) {
   METRIC_RECORD(".ninja_log load");
-  FILE* file = fopen(path.c_str(), "r");
+  FILE* file = disk_interface_->OpenFile(path, "r");
   if (!file) {
     if (errno == ENOENT)
       return LOAD_NOT_FOUND;
@@ -237,7 +241,7 @@ LoadStatus BuildLog::Load(const std::string& path, std::string* err) {
       }
       if (invalid_log_version) {
         fclose(file);
-        platformAwareUnlink(path.c_str());
+        disk_interface_->RemoveFile(path);
         // Don't report this as a failure. A missing build log will cause
         // us to rebuild the outputs anyway.
         return LOAD_NOT_FOUND;
@@ -343,7 +347,7 @@ bool BuildLog::Recompact(const std::string& path, const BuildLogUser& user,
 
   Close();
   std::string temp_path = path + ".recompact";
-  FILE* f = fopen(temp_path.c_str(), "wb");
+  FILE* f = disk_interface_->OpenFile(temp_path, "wb");
   if (!f) {
     *err = strerror(errno);
     return false;
@@ -374,18 +378,16 @@ bool BuildLog::Recompact(const std::string& path, const BuildLogUser& user,
 
   fclose(f);
 
-  return ReplaceContent(path, temp_path, err);
+  return disk_interface_->ReplaceFileContent(path, temp_path, err);
 }
 
-bool BuildLog::Restat(const StringPiece path,
-                      const DiskInterface& disk_interface,
-                      const int output_count, char** outputs,
-                      std::string* const err) {
+bool BuildLog::Restat(const StringPiece path, const int output_count,
+                      char** outputs, std::string* const err) {
   METRIC_RECORD(".ninja_log restat");
 
   Close();
   std::string temp_path = path.AsString() + ".restat";
-  FILE* f = fopen(temp_path.c_str(), "wb");
+  FILE* f = disk_interface_->OpenFile(temp_path, "wb");
   if (!f) {
     *err = strerror(errno);
     return false;
@@ -405,7 +407,7 @@ bool BuildLog::Restat(const StringPiece path,
       }
     }
     if (!skip) {
-      const TimeStamp mtime = disk_interface.Stat(pair.second->output, err);
+      const TimeStamp mtime = disk_interface_->Stat(pair.second->output, err);
       if (mtime == -1) {
         fclose(f);
         return false;
@@ -422,5 +424,5 @@ bool BuildLog::Restat(const StringPiece path,
 
   fclose(f);
 
-  return ReplaceContent(path.AsString(), temp_path, err);
+  return disk_interface_->ReplaceFileContent(path.AsString(), temp_path, err);
 }
