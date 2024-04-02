@@ -68,11 +68,23 @@ struct VirtualFileSystem : public NullDiskInterface {
   Status ReadFile(const std::string& path, std::string* contents,
                   std::string* err) override;
   int RemoveFile(const std::string& path) override;
+  FILE* OpenFile(const std::string& path, const char* mode) override;
 
   /// An entry for a single in-memory file.
   struct Entry {
-    int mtime;
+    Entry() = default;
+    ~Entry();
+
+    int mtime = 0;
+
     std::string stat_error;  // If mtime is -1.
+
+    // To support write and append modes in OpenFile(), a temporary
+    // file must be used. In this case |writable_path| will point
+    // to it. Otherwise, this string will be empty.
+    std::string writable_path;
+
+    // In-memory contents, empty if |writable_path| is not empty.
     std::string contents;
   };
 
