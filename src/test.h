@@ -48,7 +48,7 @@ void VerifyGraph(const State& state);
 /// An implementation of DiskInterface that uses an in-memory representation
 /// of disk state.  It also logs file accesses and directory creations
 /// so it can be used by tests to verify disk access patterns.
-struct VirtualFileSystem : public DiskInterface {
+struct VirtualFileSystem : public NullDiskInterface {
   VirtualFileSystem() : now_(1) {}
 
   /// "Create" a file with contents.

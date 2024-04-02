@@ -226,27 +226,9 @@ TEST_F(BuildLogTest, DuplicateVersionHeader) {
   ASSERT_NO_FATAL_FAILURE(AssertHash("command2", e->command_hash));
 }
 
-struct TestDiskInterface : public DiskInterface {
+struct TestDiskInterface : public NullDiskInterface {
   TimeStamp Stat(const std::string& path, std::string* err) const override {
     return 4;
-  }
-  bool WriteFile(const std::string& path, const std::string& contents,
-                 bool crlf_on_windows) override {
-    assert(false);
-    return true;
-  }
-  bool MakeDir(const std::string& path) override {
-    assert(false);
-    return false;
-  }
-  Status ReadFile(const std::string& path, std::string* contents,
-                  std::string* err) override {
-    assert(false);
-    return NotFound;
-  }
-  int RemoveFile(const std::string& path) override {
-    assert(false);
-    return 0;
   }
 };
 
