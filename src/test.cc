@@ -340,6 +340,79 @@ int VirtualFileSystem::RemoveFile(const string& path) {
   }
 }
 
+bool VirtualFileSystem::RenameFile(const std::string& from,
+                                   const std::string& to) {
+  auto& dirs = directories_made_;
+  auto dir_from_it = std::find(dirs.begin(), dirs.end(), from);
+  if (dir_from_it != dirs.end()) {
+    // Renaming an existing directory.
+
+    // Verify that destination is not an existing file. If so, remove it.
+    auto to_it = files_.find(to);
+    if (to_it != files_.end()) {
+      files_.erase(to_it);
+    }
+
+    // Check that an existing destination directory is empty.
+    std::string to_prefix = to + "/";
+    auto dir_to_it = std::find(dirs.begin(), dirs.end(), to);
+    if (dir_to_it != dirs.end()) {
+      // destination directory exists. Verify that it is empty.
+      for (const auto& pair : files_) {
+        const std::string& path = pair.first;
+        if (path.substr(0, to_prefix.size()) == to_prefix) {
+          errno = ENOTEMPTY;
+          return -1;
+        }
+      }
+    }
+
+    // Remove source directory from list.
+    dirs.erase(dir_from_it);
+
+    // Now rename any files belonging to the source directory.
+    // First remove any file entry from the map that starts with |from_prefix|,
+    // saving its renamed file path and entry content to |to_rename|.
+    std::string from_prefix = from + "/";
+    using FileEntry = FileMap::value_type;
+    std::vector<FileEntry> to_rename;
+    for (auto it = files_.begin(), it_last = files_.end(); it != it_last;) {
+      const auto& path = it->first;
+      if (path.substr(0, from_prefix.size()) == from_prefix) {
+        std::string to_path = to_prefix + path.substr(from_prefix.size());
+        to_rename.emplace_back(std::make_pair<std::string, Entry>(
+            std::move(to_path), std::move(it->second)));
+        it = files_.erase(it);
+      } else {
+        ++it;
+      }
+    }
+    // Now add the new renamed file entries to the map.
+    for (auto& pair : to_rename) {
+      files_.emplace(pair.first, std::move(pair.second));
+    }
+    // And done!
+    return true;
+  }
+
+  auto file_it = files_.find(from);
+  if (file_it == files_.end()) {
+    errno = ENOENT;
+    return false;
+  }
+
+  // The source is a file, check that the destination is not a directory.
+  if (std::find(dirs.begin(), dirs.end(), to) != dirs.end()) {
+    errno = EISDIR;
+    return -1;
+  }
+
+  // Overwrite destination file in map.
+  files_[to] = std::move(file_it->second);
+  files_.erase(file_it);
+  return true;
+}
+
 FILE* VirtualFileSystem::OpenFile(const std::string& path, const char* mode) {
   // Is write/append support needed?
   bool needs_writable_path = strpbrk(mode, "aw") != nullptr;

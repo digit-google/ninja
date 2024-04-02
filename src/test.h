@@ -68,6 +68,7 @@ struct VirtualFileSystem : public NullDiskInterface {
   Status ReadFile(const std::string& path, std::string* contents,
                   std::string* err) override;
   int RemoveFile(const std::string& path) override;
+  bool RenameFile(const std::string& from, const std::string& to) override;
   FILE* OpenFile(const std::string& path, const char* mode) override;
 
   /// An entry for a single in-memory file.
