@@ -67,15 +67,24 @@ struct VirtualFileSystem : public NullDiskInterface {
   Status ReadFile(const std::string& path, std::string* contents,
                   std::string* err) override;
   int RemoveFile(const std::string& path) override;
-
-  // NOTE: This implementation does not support write or append mode!
-  // It will assert() in debug builds, and return NULL/EINVAL otherwise.
+  bool RenameFile(const std::string& from, const std::string& to) override;
   FILE* OpenFile(const std::string& path, const char* mode) override;
 
   /// An entry for a single in-memory file.
   struct Entry {
-    int mtime;
+    Entry() = default;
+    ~Entry();
+
+    int mtime = 0;
+
     std::string stat_error;  // If mtime is -1.
+
+    // To support write and append modes in OpenFile(), a temporary
+    // file must be used. In this case |writable_path| will point
+    // to it. Otherwise, this string will be empty.
+    std::string writable_path;
+
+    // In-memory contents, empty if |writable_path| is not empty.
     std::string contents;
   };
 

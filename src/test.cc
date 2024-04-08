@@ -16,17 +16,19 @@
 #include <direct.h>  // Has to be before util.h is included.
 #endif
 
-#include "test.h"
+#include <errno.h>
+#include <stdio.h>
+#include <stdlib.h>
 
 #include <algorithm>
+#include <string>
 
-#include <errno.h>
-#include <stdlib.h>
+#include "test.h"
+
 #ifdef _WIN32
 #include <windows.h>
 #include <io.h>
 #else
-#include <stdio.h>
 #include <unistd.h>
 #endif
 
@@ -48,11 +50,56 @@ using namespace std;
 
 namespace {
 
+void CreateWritableTempFile(const std::string& path,
+                            const std::string contents) {
+  FILE* file = fopen(path.c_str(), "w+b");
+  if (!file)
+    Fatal("Could not create writable temporary file!");
+
+  if (!contents.empty()) {
+    int ret = fwrite(contents.data(), contents.size(), 1, file);
+    if (ret != 1)
+      Fatal("Could not write writable temporary file!");
+  }
+
+  fclose(file);
+}
+
+std::string ReadWritableTempFile(const std::string& path) {
+  std::string result;
+  FILE* file = fopen(path.c_str(), "rb");
+  if (!file)
+    Fatal("Could not read writable temporary file!");
+  if (fseek(file, 0, SEEK_END) != 0)
+    Fatal("Could not seek to end of writable temporary file!");
+  long file_size = ftell(file);
+  if (file_size < 0)
+    Fatal("Could not get writable temporary file size!");
+  result.resize(static_cast<size_t>(file_size));
+  if (file_size > 0) {
+    if (fseek(file, 0, SEEK_SET) != 0)
+      Fatal("Could not rewind to start of writable temporary file!");
+    int ret = fread(const_cast<char*>(result.data()), result.size(), 1, file);
+    if (ret != 1)
+      Fatal("Could not read writable temporary file!");
+  }
+  fclose(file);
+  return result;
+}
+
+void RemoveWritableTempFile(const std::string& path) {
+#ifdef _WIN32
+  _unlink(path.c_str());
+#else   // !_WIN32
+  unlink(path.c_str());
+#endif  // !_WIN32
+}
+
 #ifdef _WIN32
 /// Windows has no mkdtemp.  Implement it in terms of _mktemp_s.
 char* mkdtemp(char* name_template) {
   int err = _mktemp_s(name_template, strlen(name_template) + 1);
-  if (err < 0) {
+  if (err != 0) {
     perror("_mktemp_s");
     return NULL;
   }
@@ -67,18 +114,42 @@ char* mkdtemp(char* name_template) {
 }
 #endif  // _WIN32
 
-string GetSystemTempDir() {
+/// Return system temporary directory, if it exists.
+/// the result always has a trailing directory separator,
+/// or is empty on failure.
+std::string GetSystemTempDir() {
 #ifdef _WIN32
   char buf[1024];
   if (!GetTempPath(sizeof(buf), buf))
     return "";
   return buf;
 #else
+  std::string result = "/tmp/";
   const char* tempdir = getenv("TMPDIR");
-  if (tempdir)
-    return tempdir;
-  return "/tmp";
+  if (tempdir && tempdir[0]) {
+    result = tempdir;
+    if (result.back() != '/')
+      result.push_back('/');
+  }
+  return result;
 #endif
+}
+
+std::string GetTemporaryFilePath() {
+  std::string temp_path = GetSystemTempDir() + "ninja.test.XXXXXX";
+#ifdef _WIN32
+  int err =
+      _mktemp_s(const_cast<char*>(temp_path.data()), temp_path.size() + 1);
+  if (err < 0) {
+    perror("_mktemp_s");
+    return nullptr;
+  }
+#else   // !_WIN32
+  int ret = mkstemp(const_cast<char*>(temp_path.data()));
+  if (ret < 0)
+    Fatal("mkstemp");
+#endif  // !_WIN32
+  return temp_path;
 }
 
 #ifdef _WIN32
@@ -87,14 +158,8 @@ string GetSystemTempDir() {
 /// to a temporary file then returns an open handle to it. The file itself
 /// is deleted on fclose().
 FILE* fmemopen(void* buf, size_t size, const char* mode) {
-  std::string template_path = GetSystemTempDir() + "/VirtualFileSystem.XXXXXX";
-  int err = _mktemp_s(const_cast<char*>(template_path.data()),
-                      template_path.size() + 1);
-  if (err < 0) {
-    perror("_mktemp_s");
-    return nullptr;
-  }
-  std::wstring wide_path = UTF8ToWin32Unicode(template_path);
+  std::string temp_path = GetTemporaryFilePath();
+  std::wstring wide_path = UTF8ToWin32Unicode(temp_path);
   HANDLE handle =
       CreateFileW(wide_path.c_str(), DELETE | GENERIC_READ | GENERIC_WRITE, 0,
                   nullptr, CREATE_ALWAYS,
@@ -182,9 +247,15 @@ void VerifyGraph(const State& state) {
 
 void VirtualFileSystem::Create(const string& path,
                                const string& contents) {
-  files_[path].mtime = now_;
-  files_[path].contents = contents;
+  auto& entry = files_[path];
+  entry.mtime = now_;
+  entry.contents = contents;
   files_created_.insert(path);
+}
+
+VirtualFileSystem::Entry::~Entry() {
+  if (!writable_path.empty())
+    RemoveWritableTempFile(writable_path);
 }
 
 TimeStamp VirtualFileSystem::Stat(const string& path, string* err) const {
@@ -197,7 +268,22 @@ TimeStamp VirtualFileSystem::Stat(const string& path, string* err) const {
 }
 
 bool VirtualFileSystem::WriteFile(const string& path, const string& contents) {
-  Create(path, contents);
+  auto it = files_.find(path);
+  if (it == files_.end()) {
+    // This is a new file, create in-memory content.
+    Create(path, contents);
+  } else {
+    Entry& entry = it->second;
+    if (!entry.writable_path.empty()) {
+      // Write new contents to temporary writable file.
+      CreateWritableTempFile(entry.writable_path, contents);
+    } else {
+      // Replace in-memory contents.
+      entry.contents = contents;
+    }
+    entry.mtime = now_;
+    entry.stat_error.clear();
+  }
   return true;
 }
 
@@ -212,7 +298,16 @@ FileReader::Status VirtualFileSystem::ReadFile(const string& path,
   files_read_.push_back(path);
   FileMap::iterator i = files_.find(path);
   if (i != files_.end()) {
-    *contents = i->second.contents;
+    auto& entry = i->second;
+    if (!entry.writable_path.empty()) {
+      // OpenFile() was previously called with write or append mode,
+      // so read the temporary file from disk.
+      assert(entry.contents.empty());
+      *contents = ReadWritableTempFile(entry.writable_path);
+    } else {
+      // Get the content from memory.
+      *contents = entry.contents;
+    }
     return Okay;
   }
   *err = strerror(ENOENT);
@@ -220,10 +315,16 @@ FileReader::Status VirtualFileSystem::ReadFile(const string& path,
 }
 
 int VirtualFileSystem::RemoveFile(const string& path) {
-  if (find(directories_made_.begin(), directories_made_.end(), path)
-      != directories_made_.end())
+  auto& dirs = directories_made_;
+  auto dir_it = std::find(dirs.begin(), dirs.end(), path);
+  if (dir_it != dirs.end()) {
+    // Error, because RemoveFile() cannot remove directories,
+    // even if they are empty.
+    errno = EISDIR;
     return -1;
-  FileMap::iterator i = files_.find(path);
+  }
+
+  auto i = files_.find(path);
   if (i != files_.end()) {
     files_.erase(i);
     files_removed_.insert(path);
@@ -233,24 +334,110 @@ int VirtualFileSystem::RemoveFile(const string& path) {
   }
 }
 
+bool VirtualFileSystem::RenameFile(const std::string& from,
+                                   const std::string& to) {
+  auto& dirs = directories_made_;
+  auto dir_from_it = std::find(dirs.begin(), dirs.end(), from);
+  if (dir_from_it != dirs.end()) {
+    // Renaming an existing directory.
+
+    // Verify that destination is not an existing file. If so, remove it.
+    auto to_it = files_.find(to);
+    if (to_it != files_.end()) {
+      files_.erase(to_it);
+    }
+
+    // Check that an existing destination directory is empty.
+    std::string to_prefix = to + "/";
+    auto dir_to_it = std::find(dirs.begin(), dirs.end(), to);
+    if (dir_to_it != dirs.end()) {
+      // destination directory exists. Verify that it is empty.
+      for (const auto& pair : files_) {
+        const std::string& path = pair.first;
+        if (path.substr(0, to_prefix.size()) == to_prefix) {
+          errno = ENOTEMPTY;
+          return -1;
+        }
+      }
+    }
+
+    // Remove source directory from list.
+    dirs.erase(dir_from_it);
+
+    // Now rename any files belonging to the source directory.
+    // First remove any file entry from the map that starts with |from_prefix|,
+    // saving its renamed file path and entry content to |to_rename|.
+    std::string from_prefix = from + "/";
+    using FileEntry = FileMap::value_type;
+    std::vector<FileEntry> to_rename;
+    for (auto it = files_.begin(), it_last = files_.end(); it != it_last;) {
+      const auto& path = it->first;
+      if (path.substr(0, from_prefix.size()) == from_prefix) {
+        std::string to_path = to_prefix + path.substr(from_prefix.size());
+        to_rename.emplace_back(std::make_pair<std::string, Entry>(
+            std::move(to_path), std::move(it->second)));
+        it = files_.erase(it);
+      } else {
+        ++it;
+      }
+    }
+    // Now add the new renamed file entries to the map.
+    for (auto& pair : to_rename) {
+      files_.emplace(pair.first, std::move(pair.second));
+    }
+    // And done!
+    return true;
+  }
+
+  auto file_it = files_.find(from);
+  if (file_it == files_.end()) {
+    errno = ENOENT;
+    return false;
+  }
+
+  // The source is a file, check that the destination is not a directory.
+  if (std::find(dirs.begin(), dirs.end(), to) != dirs.end()) {
+    errno = EISDIR;
+    return -1;
+  }
+
+  // Overwrite destination file in map.
+  files_[to] = std::move(file_it->second);
+  files_.erase(file_it);
+  return true;
+}
+
 FILE* VirtualFileSystem::OpenFile(const std::string& path, const char* mode) {
+  // Is write/append support needed?
+  bool needs_writable_path = strpbrk(mode, "aw") != nullptr;
+
   auto it = files_.find(path);
   if (it == files_.end()) {
-    errno = ENOENT;
-    return nullptr;
-  }
-  // This implementation only supports reading.
-  for (auto ch : StringPiece(mode)) {
-    if (ch == 'w' || ch == 'a') {
-      assert(false &&
-             "VirtualFileSystem::OpenFile() does not support write or append "
-             "mode");
-      errno = EINVAL;
+    // Cannot read missing file.
+    if (!needs_writable_path) {
+      errno = ENOENT;
       return nullptr;
     }
   }
-  const std::string& data = it->second.contents;
-  return fmemopen(const_cast<char*>(data.data()), data.size(), mode);
+
+  Entry& entry = files_[path];
+
+  if (needs_writable_path && entry.writable_path.empty()) {
+    // Create a new temporary file to back the content of this file.
+    entry.writable_path = GetTemporaryFilePath();
+    if (!entry.contents.empty()) {
+      CreateWritableTempFile(entry.writable_path, entry.contents);
+      entry.contents.clear();
+    }
+  }
+
+  if (!entry.writable_path.empty()) {
+    return fopen(entry.writable_path.c_str(), mode);
+  } else {
+    // Use fmemopen() to read the data from memory directly.
+    const std::string& data = it->second.contents;
+    return fmemopen(const_cast<char*>(data.data()), data.size(), mode);
+  }
 }
 
 void ScopedTempDir::CreateAndEnter(const string& name) {
