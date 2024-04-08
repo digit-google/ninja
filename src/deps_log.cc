@@ -44,6 +44,9 @@ static const int32_t kCurrentVersion = 4;
 // internal buffers having to have this size.
 static constexpr size_t kMaxRecordSize = (1 << 19) - 1;
 
+DepsLog::DepsLog(DiskInterface& disk_interface)
+    : disk_interface_(&disk_interface) {}
+
 DepsLog::~DepsLog() {
   Close();
 }
@@ -154,7 +157,7 @@ void DepsLog::Close() {
 LoadStatus DepsLog::Load(const string& path, State* state, string* err) {
   METRIC_RECORD(".ninja_deps load");
   char buf[kMaxRecordSize + 1];
-  FILE* f = fopen(path.c_str(), "rb");
+  FILE* f = disk_interface_->OpenFile(path, "rb");
   if (!f) {
     if (errno == ENOENT)
       return LOAD_NOT_FOUND;
@@ -179,7 +182,7 @@ LoadStatus DepsLog::Load(const string& path, State* state, string* err) {
     else
       *err = "bad deps log signature or version; starting over";
     fclose(f);
-    platformAwareUnlink(path.c_str());
+    disk_interface_->RemoveFile(path);
     // Don't report this as a failure.  An empty deps log will cause
     // us to rebuild the outputs anyway.
     return LOAD_SUCCESS;
@@ -327,13 +330,13 @@ bool DepsLog::Recompact(const string& path, string* err) {
   METRIC_RECORD(".ninja_deps recompact");
 
   Close();
-  string temp_path = path + ".recompact";
+  std::string temp_path = path + ".recompact";
 
   // OpenForWrite() opens for append.  Make sure it's not appending to a
   // left-over file from a previous recompaction attempt that crashed somehow.
-  platformAwareUnlink(temp_path.c_str());
+  disk_interface_->RemoveFile(temp_path);
 
-  DepsLog new_log;
+  DepsLog new_log(*disk_interface_);
   if (!new_log.OpenForWrite(temp_path, err))
     return false;
 
@@ -363,7 +366,7 @@ bool DepsLog::Recompact(const string& path, string* err) {
   deps_.swap(new_log.deps_);
   nodes_.swap(new_log.nodes_);
 
-  return ReplaceContent(path, temp_path, err);
+  return disk_interface_->ReplaceFileContent(path, temp_path, err);
 }
 
 bool DepsLog::IsDepsEntryLiveFor(const Node* node) {
@@ -425,7 +428,7 @@ bool DepsLog::OpenForWriteIfNeeded() {
   if (file_path_.empty()) {
     return true;
   }
-  file_ = fopen(file_path_.c_str(), "ab");
+  file_ = disk_interface_->OpenFile(file_path_, "ab");
   if (!file_) {
     return false;
   }
