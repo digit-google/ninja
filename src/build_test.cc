@@ -4271,8 +4271,6 @@ TEST_F(BuildWithDepsLogTest, ValidationThroughDepfile) {
 
   string err;
 
-  SystemDiskInterface disk_interface;
-
   {
     fs_.Create("in", "");
     fs_.Create("in2", "");
@@ -4283,7 +4281,7 @@ TEST_F(BuildWithDepsLogTest, ValidationThroughDepfile) {
     ASSERT_NO_FATAL_FAILURE(AddCatRule(&state));
     ASSERT_NO_FATAL_FAILURE(AssertParse(&state, manifest));
 
-    DepsLog deps_log(disk_interface);
+    DepsLog deps_log(fs_);
     ASSERT_TRUE(deps_log.OpenForWrite(deps_log_file_.path(), &err));
     ASSERT_EQ("", err);
 
@@ -4318,7 +4316,7 @@ TEST_F(BuildWithDepsLogTest, ValidationThroughDepfile) {
     ASSERT_NO_FATAL_FAILURE(AddCatRule(&state));
     ASSERT_NO_FATAL_FAILURE(AssertParse(&state, manifest));
 
-    DepsLog deps_log(disk_interface);
+    DepsLog deps_log(fs_);
     ASSERT_TRUE(deps_log.Load(deps_log_file_.path(), &state, &err));
     ASSERT_TRUE(deps_log.OpenForWrite(deps_log_file_.path(), &err));
     ASSERT_EQ("", err);
