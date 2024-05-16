@@ -46,10 +46,10 @@ TEST(ElideMiddle, ElideAnsiEscapeCodes) {
   EXPECT_EQ("0\33[m12...6789", ElideMiddle("0\33[m1234567890123456789", 10));
 
   input = "abcd\x1b[1;31mefg\x1b[0mhlkmnopqrstuvwxyz";
-  EXPECT_EQ("", ElideMiddle(input, 0));
-  EXPECT_EQ(".", ElideMiddle(input, 1));
-  EXPECT_EQ("..", ElideMiddle(input, 2));
-  EXPECT_EQ("...", ElideMiddle(input, 3));
+  EXPECT_EQ("\x1b[1;31m\x1b[0m", ElideMiddle(input, 0));
+  EXPECT_EQ(".\x1b[1;31m\x1b[0m", ElideMiddle(input, 1));
+  EXPECT_EQ("..\x1b[1;31m\x1b[0m", ElideMiddle(input, 2));
+  EXPECT_EQ("...\x1B[1;31m\x1b[0m", ElideMiddle(input, 3));
   EXPECT_EQ("...\x1B[1;31m\x1B[0mz", ElideMiddle(input, 4));
   EXPECT_EQ("a...\x1B[1;31m\x1B[0mz", ElideMiddle(input, 5));
   EXPECT_EQ("a...\x1B[1;31m\x1B[0myz", ElideMiddle(input, 6));
@@ -57,13 +57,13 @@ TEST(ElideMiddle, ElideAnsiEscapeCodes) {
   EXPECT_EQ("ab...\x1B[1;31m\x1B[0mxyz", ElideMiddle(input, 8));
   EXPECT_EQ("abc...\x1B[1;31m\x1B[0mxyz", ElideMiddle(input, 9));
   EXPECT_EQ("abc...\x1B[1;31m\x1B[0mwxyz", ElideMiddle(input, 10));
-  EXPECT_EQ("abcd\x1B[1;31m...\x1B[0mwxyz", ElideMiddle(input, 11));
-  EXPECT_EQ("abcd\x1B[1;31m...\x1B[0mvwxyz", ElideMiddle(input, 12));
+  EXPECT_EQ("abcd...\x1B[1;31m\x1B[0mwxyz", ElideMiddle(input, 11));
+  EXPECT_EQ("abcd...\x1B[1;31m\x1B[0mvwxyz", ElideMiddle(input, 12));
 
   EXPECT_EQ("abcd\x1B[1;31mef...\x1B[0muvwxyz", ElideMiddle(input, 15));
   EXPECT_EQ("abcd\x1B[1;31mef...\x1B[0mtuvwxyz", ElideMiddle(input, 16));
-  EXPECT_EQ("abcd\x1B[1;31mefg\x1B[0m...tuvwxyz", ElideMiddle(input, 17));
-  EXPECT_EQ("abcd\x1B[1;31mefg\x1B[0m...stuvwxyz", ElideMiddle(input, 18));
+  EXPECT_EQ("abcd\x1B[1;31mefg...\x1B[0mtuvwxyz", ElideMiddle(input, 17));
+  EXPECT_EQ("abcd\x1B[1;31mefg...\x1B[0mstuvwxyz", ElideMiddle(input, 18));
   EXPECT_EQ("abcd\x1B[1;31mefg\x1B[0mh...stuvwxyz", ElideMiddle(input, 19));
 
   input = "abcdef\x1b[31mA\x1b[0mBC";
