@@ -51,7 +51,7 @@ struct DryRunCommandRunner : public CommandRunner {
   virtual ~DryRunCommandRunner() {}
 
   // Overridden from CommandRunner:
-  virtual size_t CanRunMore() const;
+  size_t CanRunMore(bool jobserver_enabled) const override;
   virtual bool StartCommand(Edge* edge);
   virtual bool WaitForCommand(Result* result);
 
@@ -59,7 +59,7 @@ struct DryRunCommandRunner : public CommandRunner {
   queue<Edge*> finished_;
 };
 
-size_t DryRunCommandRunner::CanRunMore() const {
+size_t DryRunCommandRunner::CanRunMore(bool jobserver_enabled) const {
   return SIZE_MAX;
 }
 
@@ -164,6 +164,11 @@ Edge* Plan::FindWork() {
   if (ready_.empty())
     return NULL;
 
+  // Don't initiate more work if the jobserver cannot acquire more tokens
+  if (jobserver_.Enabled() && !jobserver_.Acquire()) {
+    return nullptr;
+  }
+
   Edge* work = ready_.top();
   ready_.pop();
   return work;
@@ -200,6 +205,11 @@ bool Plan::EdgeFinished(Edge* edge, EdgeResult result, string* err) {
   if (directly_wanted)
     edge->pool()->EdgeFinished(*edge);
   edge->pool()->RetrieveReadyEdges(&ready_);
+
+  // Return the token acquired for this very edge to the jobserver
+  if (jobserver_.Enabled()) {
+    jobserver_.Release();
+  }
 
   // The rest of this function only applies to successful commands.
   if (result != kEdgeSucceeded)
@@ -579,8 +589,13 @@ void Plan::ScheduleInitialEdges() {
 }
 
 void Plan::PrepareQueue() {
+  jobserver_.Init();
   ComputeCriticalPath();
   ScheduleInitialEdges();
+}
+
+bool Plan::JobserverEnabled() const {
+  return jobserver_.Enabled();
 }
 
 void Plan::Dump() const {
@@ -596,7 +611,7 @@ void Plan::Dump() const {
 struct RealCommandRunner : public CommandRunner {
   explicit RealCommandRunner(const BuildConfig& config) : config_(config) {}
   virtual ~RealCommandRunner() {}
-  virtual size_t CanRunMore() const;
+  size_t CanRunMore(bool jobserver_enabled) const override;
   virtual bool StartCommand(Edge* edge);
   virtual bool WaitForCommand(Result* result);
   virtual vector<Edge*> GetActiveEdges();
@@ -619,7 +634,13 @@ void RealCommandRunner::Abort() {
   subprocs_.Clear();
 }
 
-size_t RealCommandRunner::CanRunMore() const {
+size_t RealCommandRunner::CanRunMore(bool jobserver_enabled) const {
+  // Return "infinite" capacity if a jobserver is used to limit the number
+  // of parallel subprocesses instead.
+  if (jobserver_enabled) {
+    return SIZE_MAX;
+  }
+
   size_t subproc_number =
       subprocs_.running_.size() + subprocs_.finished_.size();
 
@@ -792,7 +813,7 @@ bool Builder::Build(string* err) {
   while (plan_.more_to_do()) {
     // See if we can start any more commands.
     if (failures_allowed) {
-      size_t capacity = command_runner_->CanRunMore();
+      size_t capacity = command_runner_->CanRunMore(plan_.JobserverEnabled());
       while (capacity > 0) {
         Edge* edge = plan_.FindWork();
         if (!edge)
@@ -820,7 +841,7 @@ bool Builder::Build(string* err) {
           --capacity;
 
           // Re-evaluate capacity.
-          size_t current_capacity = command_runner_->CanRunMore();
+          size_t current_capacity = command_runner_->CanRunMore(plan_.JobserverEnabled());
           if (current_capacity < capacity)
             capacity = current_capacity;
         }
