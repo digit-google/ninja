@@ -207,3 +207,21 @@ bool Jobserver::ParseNativeMakeFlagsValue(const char* makeflags_env,
 #endif  // !_WIN32
   return true;
 }
+
+#ifndef _WIN32
+#include "jobserver-posix.h"
+#endif
+
+// static
+std::unique_ptr<Jobserver::Client> Jobserver::Client::Create(
+    const Jobserver::Config& config, std::string* error) {
+  // TODO: Add Posix and Windows specific implementations here.
+#ifndef _WIN32
+  if (config.mode == Jobserver::Config::kModeFileDescriptors ||
+      config.mode == Jobserver::Config::kModePosixFifo) {
+    return PosixJobserverClient::Create(config, error);
+  }
+#endif  // _WIN32
+  *error = "Unsupported jobserver mode";
+  return nullptr;
+}
