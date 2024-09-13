@@ -191,6 +191,7 @@ struct BuildConfig {
   /// means that we do not have any limit.
   double max_load_average = -0.0f;
   DepfileParserOptions depfile_parser_options;
+  Jobserver::Config::Mode jobserver_mode = Jobserver::Config::kModeNone;
 };
 
 /// Builder wraps the build process: starting commands, updating status.

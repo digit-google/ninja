@@ -225,29 +225,39 @@ struct Tool {
 
 /// Print usage information.
 void Usage(const BuildConfig& config) {
-  fprintf(stderr,
-"usage: ninja [options] [targets...]\n"
-"\n"
-"if targets are unspecified, builds the 'default' target (see manual).\n"
-"\n"
-"options:\n"
-"  --version      print ninja version (\"%s\")\n"
-"  -v, --verbose  show all command lines while building\n"
-"  --quiet        don't show progress status, just command output\n"
-"\n"
-"  -C DIR   change to DIR before doing anything else\n"
-"  -f FILE  specify input build file [default=build.ninja]\n"
-"\n"
-"  -j N     run N jobs in parallel (0 means infinity) [default=%d on this system]\n"
-"  -k N     keep going until N jobs fail (0 means infinity) [default=1]\n"
-"  -l N     do not start new jobs if the load average is greater than N\n"
-"  -n       dry run (don't run commands but act like they succeeded)\n"
-"\n"
-"  -d MODE  enable debugging (use '-d list' to list modes)\n"
-"  -t TOOL  run a subtool (use '-t list' to list subtools)\n"
-"    terminates toplevel options; further flags are passed to the tool\n"
-"  -w FLAG  adjust warnings (use '-w list' to list warnings)\n",
-          kNinjaVersion, config.parallelism);
+  fprintf(
+      stderr,
+      "usage: ninja [options] [targets...]\n"
+      "\n"
+      "if targets are unspecified, builds the 'default' target (see manual).\n"
+      "\n"
+      "options:\n"
+      "  --version      print ninja version (\"%s\")\n"
+      "  -v, --verbose  show all command lines while building\n"
+      "  --quiet        don't show progress status, just command output\n"
+      "\n"
+      "  -C DIR   change to DIR before doing anything else\n"
+      "  -f FILE  specify input build file [default=build.ninja]\n"
+      "\n"
+      "  -j N     run N jobs in parallel (0 means infinity) [default=%d on "
+      "this system]\n"
+      "  -k N     keep going until N jobs fail (0 means infinity) [default=1]\n"
+      "  -l N     do not start new jobs if the load average is greater than N\n"
+      "  -n       dry run (don't run commands but act like they succeeded)\n"
+      "\n"
+      "  -d MODE  enable debugging (use '-d list' to list modes)\n"
+      "  -t TOOL  run a subtool (use '-t list' to list subtools)\n"
+      "    terminates toplevel options; further flags are passed to the tool\n"
+      "  -w FLAG  adjust warnings (use '-w list' to list warnings)\n"
+      "\n"
+      "  --jobserver-mode MODE\n"
+      "      Start a GNU Make jobserver protocol pool.\n"
+      "      MODE can be one of the following values: %s\n"
+      "\n"
+      "  --jobserver\n"
+      "      Convenience flag, equivalent to --jobserver-mode=1\n\n",
+      kNinjaVersion, config.parallelism,
+      Jobserver::Config::GetValidNativeModesListAsString(", ").c_str());
 }
 
 /// Choose a default value for the -j (parallelism) flag.
@@ -261,6 +271,64 @@ int GuessParallelism() {
   default:
     return processors + 2;
   }
+}
+
+void SetEnvironmentVariable(const char* name, const char* value) {
+#ifdef _WIN32
+  std::string env = name + std::string("=") + value;
+  _putenv(env.c_str());
+#else   // !_WIN32
+  setenv(name, value, 1);
+#endif  // !_WIN32
+}
+
+void ClearEnvironmentVariable(const char* name) {
+#ifdef _WIN32
+  std::string env = std::string(name) + "=";
+  _putenv(env.c_str());
+#else   // !_WIN32
+  unsetenv(name);
+#endif  // !_WIN32
+}
+
+// Create a Jobserver::Pool instance if \a config allows it.
+// On failure, return a null instance. Info / warnings are set to \a status.
+// On success, this also changes the MAKEFLAGS variable in the current
+// process, so that it is passed to sub-commands later.
+std::unique_ptr<Jobserver::Pool> SetupJobserverPool(const BuildConfig& config,
+                                                    Status* status) {
+  std::unique_ptr<Jobserver::Pool> result;
+
+  if (config.parallelism == 1 || config.parallelism == INT_MAX) {
+    // No-parallelism (-j1) or infinite parallelism (-j0) was specified.
+    return result;
+  }
+
+  if (config.jobserver_mode == Jobserver::Config::kModeNone) {
+    // --jobserver was not used, and NINJA_JOBSERVER is not set.
+    return result;
+  }
+
+  if (config.verbosity >= BuildConfig::VERBOSE)
+    status->Info("Creating jobserver pool for %d parallel jobs",
+                 config.parallelism);
+
+  std::string err;
+  result = Jobserver::Pool::Create(static_cast<size_t>(config.parallelism),
+                                   config.jobserver_mode, &err);
+  if (!result.get()) {
+    if (config.verbosity > BuildConfig::QUIET)
+      status->Warning("Jobserver pool creation failed: %s", err.c_str());
+    return result;
+  }
+
+  std::string makeflags = result->GetEnvMakeFlagsValue();
+
+  //  Set or override the MAKEFLAGS environment variable in
+  // the current process. This ensures it is passed to sub-commands
+  // as well
+  SetEnvironmentVariable("MAKEFLAGS", makeflags.c_str());
+  return result;
 }
 
 /// Rebuild the build manifest, if necessary.
@@ -1698,15 +1766,23 @@ int ReadFlags(int* argc, char*** argv,
               Options* options, BuildConfig* config) {
   DeferGuessParallelism deferGuessParallelism(config);
 
-  enum { OPT_VERSION = 1, OPT_QUIET = 2 };
+  enum {
+    OPT_VERSION = 1,
+    OPT_QUIET = 2,
+    OPT_JOBSERVER = 3,
+    OPT_JOBSERVER_MODE = 4
+  };
   const option kLongOptions[] = {
     { "help", no_argument, NULL, 'h' },
     { "version", no_argument, NULL, OPT_VERSION },
     { "verbose", no_argument, NULL, 'v' },
     { "quiet", no_argument, NULL, OPT_QUIET },
+    { "jobserver", no_argument, NULL, OPT_JOBSERVER },
+    { "joberver-mode", required_argument, NULL, OPT_JOBSERVER_MODE },
     { NULL, 0, NULL, 0 }
   };
 
+  const char* jobserver_mode = nullptr;
   int opt;
   while (!options->tool &&
          (opt = getopt_long(*argc, *argv, "d:f:j:k:l:nt:vw:C:h", kLongOptions,
@@ -1777,6 +1853,12 @@ int ReadFlags(int* argc, char*** argv,
       case OPT_VERSION:
         printf("%s\n", kNinjaVersion);
         return 0;
+      case OPT_JOBSERVER:
+        jobserver_mode = "1";
+        break;
+      case OPT_JOBSERVER_MODE:
+        jobserver_mode = optarg ? optarg : "1";
+        break;
       case 'h':
       default:
         deferGuessParallelism.Refresh();
@@ -1786,6 +1868,22 @@ int ReadFlags(int* argc, char*** argv,
   }
   *argv += optind;
   *argc -= optind;
+
+  // If an explicit --jobserver has not been used, lookup the NINJA_JOBSERVER
+  // environment variable. Ignore it if parallelism was set explicitly on the
+  // command line though (and warn about it).
+  if (jobserver_mode == nullptr) {
+    jobserver_mode = getenv("NINJA_JOBSERVER");
+  }
+  if (jobserver_mode) {
+    auto ret = Jobserver::Config::ModeFromString(jobserver_mode);
+    config->jobserver_mode = ret.second;
+    if (!ret.first && !config->dry_run &&
+        config->verbosity > BuildConfig::QUIET) {
+      Warning("Invalid jobserver mode '%s': Must be one of: %s", jobserver_mode,
+              Jobserver::Config::GetValidNativeModesListAsString(", ").c_str());
+    }
+  }
 
   return -1;
 }
@@ -1825,6 +1923,24 @@ NORETURN void real_main(int argc, char** argv) {
     NinjaMain ninja(ninja_command, config);
     exit((ninja.*options.tool->func)(&options, argc, argv));
   }
+
+  // Determine whether to setup a Jobserver pool. This depends on
+  // --jobserver or --jobserver-mode=MODE being passed on the command-line,
+  // or NINJA_JOBSERVER=MODE being set in the environment.
+  //
+  // This must be ignored if a tool is being used, or no/infinite
+  // parallelism is being asked.
+  //
+  // At the moment, this overrides any MAKEFLAGS definition in
+  // the environment.
+  std::unique_ptr<Jobserver::Pool> jobserver_pool;
+  if (!options.tool) {
+    jobserver_pool = SetupJobserverPool(config, status);
+  }
+
+  // Unset NINJA_JOBSERVER unconditionally in subprocesses
+  // to avoid multiple sub-pools to be started by mistake.
+  ClearEnvironmentVariable("NINJA_JOBSERVER");
 
   // Limit number of rebuilds, to prevent infinite loops.
   const int kCycleLimit = 100;
