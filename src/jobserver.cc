@@ -225,3 +225,19 @@ std::unique_ptr<Jobserver::Client> Jobserver::Client::Create(
   *error = "Unsupported jobserver mode";
   return nullptr;
 }
+
+// static
+std::unique_ptr<Jobserver::Pool> Jobserver::Pool::Create(
+    size_t num_job_slots, Jobserver::Config::Mode mode, std::string* error) {
+  if (num_job_slots < 2) {
+    *error = "At least 2 job slots needed";
+    return nullptr;
+  }
+
+#ifdef _WIN32
+  *error = "Unsupported jobserver mode";
+  return nullptr;
+#else   // !_WIN32
+  return PosixJobserverPool::Create(num_job_slots, mode, error);
+#endif  // !_WIN32
+}
