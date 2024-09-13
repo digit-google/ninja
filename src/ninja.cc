@@ -36,13 +36,14 @@
 #include "browse.h"
 #include "build.h"
 #include "build_log.h"
-#include "deps_log.h"
 #include "clean.h"
 #include "debug_flags.h"
 #include "depfile_parser.h"
+#include "deps_log.h"
 #include "disk_interface.h"
 #include "graph.h"
 #include "graphviz.h"
+#include "jobserver.h"
 #include "json.h"
 #include "manifest_parser.h"
 #include "metrics.h"
@@ -1359,8 +1360,8 @@ bool NinjaMain::EnsureBuildDirExists() {
 }
 
 int NinjaMain::RunBuild(int argc, char** argv, Status* status) {
-  string err;
-  vector<Node*> targets;
+  std::string err;
+  std::vector<Node*> targets;
   if (!CollectTargetsFromArgs(argc, argv, &targets, &err)) {
     status->Error("%s", err.c_str());
     return 1;
@@ -1370,6 +1371,32 @@ int NinjaMain::RunBuild(int argc, char** argv, Status* status) {
 
   Builder builder(&state_, config_, &build_log_, &deps_log_, &disk_interface_,
                   status, start_time_millis_);
+
+  // Detect jobserver context and inject Jobserver::Client into the builder
+  // if needed.
+  std::unique_ptr<Jobserver::Client> jobserver_client;
+
+  if (!config_.dry_run) {
+    Jobserver::Config jobserver_config;
+    const char* makeflags = getenv("MAKEFLAGS");
+    if (makeflags &&
+        Jobserver::ParseNativeMakeFlagsValue(makeflags, &jobserver_config,
+                                             &err) &&
+        jobserver_config.HasMode()) {
+      if (config_.verbosity > BuildConfig::NO_STATUS_UPDATE)
+        status->Info("Jobserver mode detected: %s", makeflags);
+
+      jobserver_client = Jobserver::Client::Create(jobserver_config, &err);
+      if (!jobserver_client.get() && config_.verbosity > BuildConfig::QUIET)
+        status->Error("Could not initialize jobserver!");
+
+      builder.SetJobserverClient(jobserver_client.get());
+    }
+
+    if (!err.empty() && config_.verbosity > BuildConfig::NO_STATUS_UPDATE)
+      status->Warning("Jobserver warning: %s", err.c_str());
+  }
+
   for (size_t i = 0; i < targets.size(); ++i) {
     if (!builder.AddTarget(targets[i], &err)) {
       if (!err.empty()) {
