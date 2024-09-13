@@ -210,6 +210,16 @@ struct Jobserver {
     Client() = default;
   };
 
+  /// Parse a NINJA_JOBSERVER=<MODE> of --jobserver=<MODE> string and
+  /// convert that into the corresponding Jobserver::Config::Mode value.
+  /// On success, set |*mode| and return true. On error, meaning the
+  /// mode is not recognized, return false.
+  static bool ParseModeString(const char* mode_string, Config::Mode* mode);
+
+  /// Return a string that contains a comma-separated list of valid
+  /// values for NINJA_JOBSERVER mode. Useful for error messages only.
+  static std::string GetValidModeStrings();
+
   /// Jobserver::Pool implements a jobserver pool of job slots according
   /// to the GNU Make protocol. Usage is the following:
   ///

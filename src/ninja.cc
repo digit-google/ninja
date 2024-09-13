@@ -1372,23 +1372,73 @@ int NinjaMain::RunBuild(int argc, char** argv, Status* status) {
   Builder builder(&state_, config_, &build_log_, &deps_log_, &disk_interface_,
                   status, start_time_millis_);
 
-  // Detect jobserver context and inject Jobserver::Client into the builder
-  // if needed.
+  // If MAKEFLAGS is set, only setup a Jobserver client if needed.
+  // (this means that an empty MAKEFLAGS value disables the feature).
+  //
+  // Otherwise, look for the NINJA_JOBSERVER environment variable. If set
+  // the value will be interpreted to setup a jobserver pool in case of
+  // parallelism.
+  std::unique_ptr<Jobserver::Pool> jobserver_pool;
   std::unique_ptr<Jobserver::Client> jobserver_client;
+  std::string jobserver_pool_makeflags;
 
   if (!config_.dry_run) {
     Jobserver::Config jobserver_config;
     const char* makeflags = getenv("MAKEFLAGS");
+    if (!makeflags) {
+      // INT_MAX parallelism correspond to -j0 which means "infinite"
+      // parallelism. do not implement a jobserver pool in this case.
+      if (config_.parallelism > 1 && config_.parallelism != INT_MAX) {
+        if (config_.jobserver_mode != Jobserver::Config::kModeNone) {
+          if (config_.verbosity >= BuildConfig::VERBOSE)
+            status->Info("Creating jobserver pool for %d parallel jobs",
+                         config_.parallelism);
+
+          jobserver_pool =
+              Jobserver::Pool::Create(static_cast<size_t>(config_.parallelism),
+                                      config_.jobserver_mode, &err);
+          if (!jobserver_pool.get()) {
+            if (config_.verbosity > BuildConfig::QUIET)
+              status->Warning("Jobserver pool creation failed: %s",
+                              err.c_str());
+          } else {
+            jobserver_pool_makeflags = jobserver_pool->GetEnvMakeFlagsValue();
+            makeflags = jobserver_pool_makeflags.c_str();
+
+            // Set the environment variable in the current process.
+            // This ensures it is passed to sub-commands as well.
+#ifdef _WIN32
+            // TODO(digit): Verify that this works correctly on Win32.
+            // this code assumes that _putenv(), unlike Posix putenv()
+            // does create a copy of the input string, and that the
+            // resulting environment is passed to processes launched
+            // with CreateProcess (the documentation only mentions
+            // _spawn() and _exec()).
+            std::string env = "MAKEFLAGS=" + jobserver_pool_makeflags;
+            _putenv(env.c_str());
+#else
+            setenv("MAKEFLAGS", makeflags, 0);
+#endif
+          }
+        }
+      }
+    }
+
+    // No setup a Jobserver client if necessary. This could be because
+    // one was started by Ninja (see above), or because Ninja is already
+    // running in the context of another pool which defined MAKEFLAGS.
     if (makeflags &&
         Jobserver::ParseNativeMakeFlagsValue(makeflags, &jobserver_config,
                                              &err) &&
         jobserver_config.HasMode()) {
-      if (config_.verbosity > BuildConfig::NO_STATUS_UPDATE)
+      if (config_.verbosity >= BuildConfig::VERBOSE)
         status->Info("Jobserver mode detected: %s", makeflags);
 
       jobserver_client = Jobserver::Client::Create(jobserver_config, &err);
-      if (!jobserver_client.get() && config_.verbosity > BuildConfig::QUIET)
-        status->Error("Could not initialize jobserver!");
+      if (!jobserver_client.get() &&
+          config_.verbosity >= BuildConfig::NO_STATUS_UPDATE) {
+        status->Error("Could not initialize jobserver: %s", err.c_str());
+      }
 
       builder.SetJobserverClient(jobserver_client.get());
     }
@@ -1476,15 +1526,16 @@ int ReadFlags(int* argc, char*** argv,
               Options* options, BuildConfig* config) {
   DeferGuessParallelism deferGuessParallelism(config);
 
-  enum { OPT_VERSION = 1, OPT_QUIET = 2 };
-  const option kLongOptions[] = {
-    { "help", no_argument, NULL, 'h' },
-    { "version", no_argument, NULL, OPT_VERSION },
-    { "verbose", no_argument, NULL, 'v' },
-    { "quiet", no_argument, NULL, OPT_QUIET },
-    { NULL, 0, NULL, 0 }
-  };
+  enum { OPT_VERSION = 1, OPT_QUIET = 2, OPT_JOBSERVER = 3 };
+  const option kLongOptions[] = { { "help", no_argument, NULL, 'h' },
+                                  { "version", no_argument, NULL, OPT_VERSION },
+                                  { "verbose", no_argument, NULL, 'v' },
+                                  { "quiet", no_argument, NULL, OPT_QUIET },
+                                  { "jobserver", optional_argument, NULL,
+                                    OPT_JOBSERVER },
+                                  { NULL, 0, NULL, 0 } };
 
+  const char* jobserver_mode = nullptr;
   int opt;
   while (!options->tool &&
          (opt = getopt_long(*argc, *argv, "d:f:j:k:l:nt:vw:C:h", kLongOptions,
@@ -1553,6 +1604,9 @@ int ReadFlags(int* argc, char*** argv,
       case OPT_VERSION:
         printf("%s\n", kNinjaVersion);
         return 0;
+      case OPT_JOBSERVER:
+        jobserver_mode = optarg ? optarg : "1";
+        break;
       case 'h':
       default:
         deferGuessParallelism.Refresh();
@@ -1562,6 +1616,26 @@ int ReadFlags(int* argc, char*** argv,
   }
   *argv += optind;
   *argc -= optind;
+
+  // If an explicit --jobserver has not been used, lookup the NINJA_JOBSERVER
+  // environment variable. Ignore it if parallelism was set explicitly on the
+  // command line though (and warn about it).
+  if (jobserver_mode == nullptr) {
+    jobserver_mode = getenv("NINJA_JOBSERVER");
+    if (jobserver_mode && !deferGuessParallelism.needGuess) {
+      if (!config->dry_run && config->verbosity > BuildConfig::QUIET)
+        Warning(
+            "Explicit parallelism (-j), ignoring NINJA_JOBSERVER environment "
+            "variable.");
+      jobserver_mode = nullptr;
+    }
+  }
+  if (jobserver_mode) {
+    if (!Jobserver::ParseModeString(jobserver_mode, &config->jobserver_mode))
+      if (!config->dry_run && config->verbosity > BuildConfig::QUIET)
+        Warning("Invalid jobserver mode '%s': Must be one of %s",
+                jobserver_mode, Jobserver::GetValidModeStrings().c_str());
+  }
 
   return -1;
 }

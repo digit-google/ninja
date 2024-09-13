@@ -241,3 +241,39 @@ std::unique_ptr<Jobserver::Pool> Jobserver::Pool::Create(
   return PosixJobserverPool::Create(num_job_slots, mode, error);
 #endif  // !_WIN32
 }
+
+static const struct {
+  const char* mode_str;
+  Jobserver::Config::Mode mode_value;
+} kValidModeStrings[] = {
+  { "1", Jobserver::Pool::kDefaultMode },
+  { "0", Jobserver::Config::kModeNone },
+  { "pipe", Jobserver::Config::kModeFileDescriptors },
+  { "fifo", Jobserver::Config::kModePosixFifo },
+  { "sem", Jobserver::Config::kModeWin32Semaphore },
+};
+
+// static
+bool Jobserver::ParseModeString(const char* mode_str,
+                                Jobserver::Config::Mode* mode) {
+  if (mode_str) {
+    for (const auto& valid : kValidModeStrings) {
+      if (!strcmp(valid.mode_str, mode_str)) {
+        *mode = valid.mode_value;
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+// static
+std::string Jobserver::GetValidModeStrings() {
+  std::string result;
+  for (const auto& valid : kValidModeStrings) {
+    if (!result.empty())
+      result += ", ";
+    result += valid.mode_str;
+  }
+  return result;
+}

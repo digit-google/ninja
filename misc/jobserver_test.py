@@ -172,6 +172,50 @@ class JobserverTest(unittest.TestCase):
     def test_jobserver_client_with_posix_fifo(self):
         self._run_client_test([sys.executable, "-S", _JOBSERVER_POOL_SCRIPT])
 
+    def _run_pool_test(self, mode: str) -> None:
+        task_count = 10
+        build_plan = generate_build_plan(task_count)
+        build_env = default_env.copy()
+        build_env["NINJA_JOBSERVER"] = mode
+        with BuildDir(build_plan) as b:
+            # First, run the full 10 tasks with with 10 tokens, this should allow all
+            # tasks to run in parallel.
+            b.run(
+                [NINJA_PATH, "-C", b.path, f"-j{task_count}", "all"],
+                env=build_env,
+            )
+            max_overlaps = compute_max_overlapped_spans(b.path, task_count)
+            self.assertEqual(max_overlaps, 10)
+
+            # Second, use 4 tokens only, and verify that this was enforced by Ninja.
+            b.run([NINJA_PATH, "-C", b.path, "-t", "clean"])
+            b.run(
+                [NINJA_PATH, "-C", b.path, "-j4", "all"],
+                env=build_env,
+            )
+            max_overlaps = compute_max_overlapped_spans(b.path, task_count)
+            self.assertEqual(max_overlaps, 4)
+
+            # Finally, verify that --token-count=1 serializes all tasks.
+            b.run([NINJA_PATH, "-C", b.path, "-t", "clean"])
+            b.run(
+                [NINJA_PATH, "-C", b.path, "-j1", "all"],
+                env=build_env,
+            )
+            max_overlaps = compute_max_overlapped_spans(b.path, task_count)
+            self.assertEqual(max_overlaps, 1)
+
+    def test_jobserver_pool_with_default_mode(self):
+        self._run_pool_test("1")
+
+    @unittest.skipIf(_PLATFORM_IS_WINDOWS, "These test methods do not work on Windows")
+    def test_jobserver_pool_with_posix_pipe(self):
+        self._run_pool_test("pipe")
+
+    @unittest.skipIf(_PLATFORM_IS_WINDOWS, "These test methods do not work on Windows")
+    def test_jobserver_pool_with_posix_fifo(self):
+        self._run_pool_test("fifo")
+
 
 if __name__ == "__main__":
     unittest.main()
