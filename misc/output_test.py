@@ -47,6 +47,7 @@ class BuildDir:
         cmd_args: T.Sequence[str] = [],
         env: T.Dict[str, str] = default_env,
         cwd: T.Union[None, str] = "",
+        smart_terminal: bool = False,
     ) -> str:
         """Run Ninja command and retrieve its output.
 
@@ -59,6 +60,9 @@ class BuildDir:
             cwd: An optional current directory to run the command in.
                 By default, it is run in the build directory's path.
                 Use "" (an empty string) to run in the current directory instead.
+            smart_terminal: Set to True to simulate a smart terminal. On Posix
+                this uses the 'script' program, on Windows, this launches a
+                new console window, as there is no other way to do that.
         Returns:
             the combined stdout and stderr as a string, with \r removed when
             running on Windows.
@@ -66,11 +70,25 @@ class BuildDir:
         ninja_cmd = [NINJA_PATH] + cmd_args
         if cwd == "":
             cwd = self.d.name
+        creationflags=0
+        if smart_terminal:
+            if _IS_WINDOWS:
+                # Run in a console without displaying any window.
+                creationflags = subprocess.CREATE_NEW_CONSOLE | subprocess.CREATE_NO_WINDOW
+                env = dict(env).update({"CLI_COLORFORCE": "1"})
+            else:
+                quoted_cmd = " ".join(shlex.quote(a) for a in ninja_cmd)
+                if platform.system() == "Darwin":
+                    ninja_cmd = ["script", "-q", "/dev/null", "bash", "-c", quoted_cmd]
+                else:
+                    ninja_cmd = ["script", "-qfec", quoted_cmd, "/dev/null"]
+
         ret = subprocess.run(
             ninja_cmd,
             text=True,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
+            creationflags=creationflags,
             cwd=cwd,
             env=env,
         )
@@ -146,7 +164,7 @@ def run_plan(
 
 def run_with_color(
     build_ninja: str,
-    flags: str = "",
+    args: T.Sequence[str] = [],
     env: T.Dict[str, str] = default_env,
 ) -> str:
     """Same as run_plan(), but uses a pseudo smart terminal to run the command.
@@ -163,7 +181,7 @@ def run_with_color(
         Combined stdout + stderr output as a single string.
     """
     with BuildDir(build_ninja) as b:
-        return b.run(flags, False, env)
+        return b.run_cmd(cmd_args=args, env=env, smart_terminal=True)
 
 
 class Output(unittest.TestCase):
@@ -212,9 +230,7 @@ a
 """
         self.assertEqual(run_plan(build_plan, ["-j3"]), expected_output)
 
-    @unittest.skipIf(
-        platform.system() == "Windows", "These test methods do not work on Windows"
-    )
+    @unittest.skipIf(platform.system() == "Windows", "These test methods do not work on Windows")
     def test_issue_1214(self) -> None:
         print_red = """rule echo
   command = printf '\x1b[31mred\x1b[0m'
@@ -237,7 +253,7 @@ red
         )
         # Even in verbose mode, colors should still only be stripped when piped.
         self.assertEqual(
-            run_with_color(print_red, flags="-v"),
+            run_with_color(print_red, ['-v']),
             """[1/1] printf '\x1b[31mred\x1b[0m'
 \x1b[31mred\x1b[0m
 """,
