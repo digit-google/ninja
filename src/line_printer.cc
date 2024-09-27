@@ -35,9 +35,21 @@
 
 LinePrinter::LinePrinter() {
   // If TERM is not set, or is set to "dumb", force a dumb configuration.
+  // If TERM is "ninja-test-terminal", force a smart terminal configuration
+  // which supports ANSI colors. This is used by regression tests to
+  // avoid creating ptys.
   const char* term = getenv("TERM");
   if (!term || !strcmp(term, "dumb")) {
     smart_terminal_ = false;
+  } else if (!strcmp(term, "ninja-test-terminal")) {
+    smart_terminal_ = true;
+    // The test terminal width is 80 by default, but can be
+    // overridden with NINJA_TEST_TERMINAL_WIDTH
+    test_terminal_width_ = 80;
+    const char* width_env = getenv("NINJA_TEST_TERMINAL_WIDTH");
+    if (width_env) {
+      test_terminal_width_ = static_cast<size_t>(atoi(width_env));
+    }
   } else {
 #ifndef _WIN32
     smart_terminal_ = isatty(1);
@@ -57,7 +69,7 @@ LinePrinter::LinePrinter() {
   if (clicolor_force) {
     supports_color_ = !strcmp(clicolor_force, "1");
 #ifdef _WIN32
-  } else if (supports_color_) {
+  } else if (supports_color_ && !test_terminal_width_) {
     // On Windows, try to enable virtual terminal processing. This will fail
     // prior to Windows 10 because the console does not support ANSI color
     // sequences properly.
@@ -90,50 +102,58 @@ void LinePrinter::Print(std::string to_print, LineType type) {
     return;
   }
 
-#ifdef _WIN32
-  CONSOLE_SCREEN_BUFFER_INFO csbi;
-  GetConsoleScreenBufferInfo(console_, &csbi);
-  size_t console_width = static_cast<size_t>(csbi.dwSize.X);
+  bool do_print = true;
 
-  ElideMiddleInPlace(to_print, console_width);
-
-  if (supports_color_) {
-    // This code path is taken on Windows 10 or later, because
-    // the console subsystem supprots VT/ANSI sequences sufficiently
-    // properly.
-    printf("%s\x1B[K", to_print.c_str());  // Clear to end of line.
-    fflush(stdout);
+  if (test_terminal_width_ > 0) {
+    // This is the terminal used during regression tests.
+    // Assume this supports all ANSI sequences, and avoid
+    // using the Console API on Windows.
+    ElideMiddleInPlace(to_print, test_terminal_width_);
   } else {
-    // This code path is taken on Windows 8 and earlier versions of
-    // the system which do not have proper VT/ANSI sequence parsing,
-    // so the input shouldn't have any ANSI color sequences here.
+#ifdef _WIN32
+    CONSOLE_SCREEN_BUFFER_INFO csbi;
+    GetConsoleScreenBufferInfo(console_, &csbi);
+    size_t console_width = static_cast<size_t>(csbi.dwSize.X);
 
-    // We don't want to have the cursor spamming back and forth, so instead of
-    // printf use WriteConsoleOutput which updates the contents of the buffer,
-    // but doesn't move the cursor position.
-    COORD buf_size = { csbi.dwSize.X, 1 };
-    COORD zero_zero = { 0, 0 };
-    SMALL_RECT target = { csbi.dwCursorPosition.X, csbi.dwCursorPosition.Y,
-                          static_cast<SHORT>(csbi.dwCursorPosition.X +
-                                             csbi.dwSize.X - 1),
-                          csbi.dwCursorPosition.Y };
-    std::vector<CHAR_INFO> char_data(console_width);
-    for (size_t i = 0; i < console_width; ++i) {
-      char_data[i].Char.AsciiChar = i < to_print.size() ? to_print[i] : ' ';
-      char_data[i].Attributes = csbi.wAttributes;
+    ElideMiddleInPlace(to_print, console_width);
+
+    if (!supports_color_) {
+      // This code path is taken on Windows 8 and earlier versions of
+      // the system which do not have proper VT/ANSI sequence parsing,
+      // so the input shouldn't have any ANSI color sequences here.
+
+      // We don't want to have the cursor spamming back and forth, so instead of
+      // printf use WriteConsoleOutput which updates the contents of the buffer,
+      // but doesn't move the cursor position.
+      COORD buf_size = { csbi.dwSize.X, 1 };
+      COORD zero_zero = { 0, 0 };
+      SMALL_RECT target = { csbi.dwCursorPosition.X, csbi.dwCursorPosition.Y,
+                            static_cast<SHORT>(csbi.dwCursorPosition.X +
+                                               csbi.dwSize.X - 1),
+                            csbi.dwCursorPosition.Y };
+      std::vector<CHAR_INFO> char_data(console_width);
+      for (size_t i = 0; i < console_width; ++i) {
+        char_data[i].Char.AsciiChar = i < to_print.size() ? to_print[i] : ' ';
+        char_data[i].Attributes = csbi.wAttributes;
+      }
+      WriteConsoleOutput(console_, &char_data[0], buf_size, zero_zero, &target);
+
+      do_print = false;
     }
-    WriteConsoleOutput(console_, &char_data[0], buf_size, zero_zero, &target);
-  }
 #else   // !_WIN32
-  // Limit output to width of the terminal if provided so we don't cause
-  // line-wrapping.
-  winsize size;
-  if ((ioctl(STDOUT_FILENO, TIOCGWINSZ, &size) == 0) && size.ws_col) {
-    ElideMiddleInPlace(to_print, size.ws_col);
-  }
-  printf("%s\x1B[K", to_print.c_str());  // Print + clear to end of line.
-  fflush(stdout);
+    // Limit output to width of the terminal if provided so we don't cause
+    // line-wrapping.
+    winsize size;
+    if ((ioctl(STDOUT_FILENO, TIOCGWINSZ, &size) == 0) && size.ws_col) {
+      ElideMiddleInPlace(to_print, size.ws_col);
+    }
 #endif  // !_WIN32
+  }
+
+  if (do_print) {
+    printf("%s\x1B[K", to_print.c_str());  // Print + clear to end of line.
+    fflush(stdout);
+  }
 
   have_blank_line_ = false;
 }
