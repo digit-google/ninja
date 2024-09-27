@@ -71,6 +71,9 @@ struct LinePrinter {
   /// Buffered console output while console is locked.
   std::string output_buffer_;
 
+  /// Terminal width used during regression tests.
+  size_t test_terminal_width_ = 0;
+
 #ifdef _WIN32
   void* console_ = nullptr;
 #endif
