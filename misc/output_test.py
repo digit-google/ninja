@@ -63,16 +63,14 @@ class BuildDir:
           below.
         """
         ninja_cmd = '{} {}'.format(NINJA_PATH, flags)
+        if not pipe:
+          env = env.copy()
+          env["TERM"] = "ninja-test-terminal"
+
         try:
-            if pipe:
-                output = subprocess.check_output(
-                    [ninja_cmd], shell=True, cwd=self.d.name, env=env)
-            elif platform.system() == 'Darwin':
-                output = subprocess.check_output(['script', '-q', '/dev/null', 'bash', '-c', ninja_cmd],
-                                                 cwd=self.d.name, env=env)
-            else:
-                output = subprocess.check_output(['script', '-qfec', ninja_cmd, '/dev/null'],
-                                                 cwd=self.d.name, env=env)
+            ret = subprocess.run(
+                [ninja_cmd], shell=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, cwd=self.d.name, env=env)
+            output = ret.stdout
         except subprocess.CalledProcessError as err:
             sys.stdout.buffer.write(err.output)
             raise err
@@ -126,7 +124,6 @@ def run(
     with BuildDir(build_ninja) as b:
         return b.run(flags, pipe, raw_output, env)
 
-@unittest.skipIf(platform.system() == 'Windows', 'These test methods do not work on Windows')
 class Output(unittest.TestCase):
     BUILD_SIMPLE_ECHO = '\n'.join((
         'rule echo',
