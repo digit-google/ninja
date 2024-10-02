@@ -16,6 +16,7 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #ifdef _WIN32
 #include <windows.h>
 #ifndef ENABLE_VIRTUAL_TERMINAL_PROCESSING
@@ -33,33 +34,39 @@
 #include "util.h"
 
 LinePrinter::LinePrinter() {
+  // If TERM is not set, or is set to "dumb", force a dumb configuration.
   const char* term = getenv("TERM");
-#ifndef _WIN32
-  smart_terminal_ = isatty(1) && term && std::string(term) != "dumb";
-#else
-  if (term && std::string(term) == "dumb") {
+  if (!term || !strcmp(term, "dumb")) {
     smart_terminal_ = false;
   } else {
+#ifndef _WIN32
+    smart_terminal_ = isatty(1);
+#else
     console_ = GetStdHandle(STD_OUTPUT_HANDLE);
     CONSOLE_SCREEN_BUFFER_INFO csbi;
     smart_terminal_ = GetConsoleScreenBufferInfo(console_, &csbi);
-  }
 #endif
+  }
+
+  // Assume that a smart terminal supports ANSI color sequences,
   supports_color_ = smart_terminal_;
+
+  // Setting CLICOLOR_FORCE=1 forces color supports.
+  // Setting CLICOLOR_FORCE=0 disables it.
+  const char* clicolor_force = getenv("CLICOLOR_FORCE");
+  if (clicolor_force) {
+    supports_color_ = !strcmp(clicolor_force, "1");
 #ifdef _WIN32
-  // Try enabling ANSI escape sequence support on Windows 10 terminals.
-  if (supports_color_) {
+  } else if (supports_color_) {
+    // On Windows, try to enable virtual terminal processing. This will fail
+    // prior to Windows 10 because the console does not support ANSI color
+    // sequences properly.
     DWORD mode;
-    if (GetConsoleMode(console_, &mode)) {
-      if (!SetConsoleMode(console_, mode | ENABLE_VIRTUAL_TERMINAL_PROCESSING)) {
-        supports_color_ = false;
-      }
+    if (GetConsoleMode(console_, &mode) &&
+        !SetConsoleMode(console_, mode | ENABLE_VIRTUAL_TERMINAL_PROCESSING)) {
+      supports_color_ = false;
     }
-  }
-#endif
-  if (!supports_color_) {
-    const char* clicolor_force = getenv("CLICOLOR_FORCE");
-    supports_color_ = clicolor_force && std::string(clicolor_force) != "0";
+#endif  // !_WIN32
   }
 }
 
@@ -76,50 +83,59 @@ void LinePrinter::Print(std::string to_print, LineType type) {
     // pausing the executable when the "Pause" key or Ctrl-S is pressed.
   }
 
-  if (smart_terminal_ && type == ELIDE) {
-#ifdef _WIN32
-    CONSOLE_SCREEN_BUFFER_INFO csbi;
-    GetConsoleScreenBufferInfo(console_, &csbi);
-
-    ElideMiddleInPlace(to_print, static_cast<size_t>(csbi.dwSize.X));
-    if (supports_color_) {  // this means ENABLE_VIRTUAL_TERMINAL_PROCESSING
-                            // succeeded
-      printf("%s\x1B[K", to_print.c_str());  // Clear to end of line.
-      fflush(stdout);
-    } else {
-      // We don't want to have the cursor spamming back and forth, so instead of
-      // printf use WriteConsoleOutput which updates the contents of the buffer,
-      // but doesn't move the cursor position.
-      COORD buf_size = { csbi.dwSize.X, 1 };
-      COORD zero_zero = { 0, 0 };
-      SMALL_RECT target = { csbi.dwCursorPosition.X, csbi.dwCursorPosition.Y,
-                            static_cast<SHORT>(csbi.dwCursorPosition.X +
-                                               csbi.dwSize.X - 1),
-                            csbi.dwCursorPosition.Y };
-      std::vector<CHAR_INFO> char_data(csbi.dwSize.X);
-      for (size_t i = 0; i < static_cast<size_t>(csbi.dwSize.X); ++i) {
-        char_data[i].Char.AsciiChar = i < to_print.size() ? to_print[i] : ' ';
-        char_data[i].Attributes = csbi.wAttributes;
-      }
-      WriteConsoleOutput(console_, &char_data[0], buf_size, zero_zero, &target);
-    }
-#else
-    // Limit output to width of the terminal if provided so we don't cause
-    // line-wrapping.
-    winsize size;
-    if ((ioctl(STDOUT_FILENO, TIOCGWINSZ, &size) == 0) && size.ws_col) {
-      ElideMiddleInPlace(to_print, size.ws_col);
-    }
-    printf("%s", to_print.c_str());
-    printf("\x1B[K");  // Clear to end of line.
-    fflush(stdout);
-#endif
-
-    have_blank_line_ = false;
-  } else {
+  if (!smart_terminal_ || type != ELIDE) {
     printf("%s\n", to_print.c_str());
     fflush(stdout);
+    have_blank_line_ = true;
+    return;
   }
+
+#ifdef _WIN32
+  CONSOLE_SCREEN_BUFFER_INFO csbi;
+  GetConsoleScreenBufferInfo(console_, &csbi);
+  size_t console_width = static_cast<size_t>(csbi.dwSize.X);
+
+  ElideMiddleInPlace(to_print, console_width);
+
+  if (supports_color_) {
+    // This code path is taken on Windows 10 or later, because
+    // the console subsystem supprots VT/ANSI sequences sufficiently
+    // properly.
+    printf("%s\x1B[K", to_print.c_str());  // Clear to end of line.
+    fflush(stdout);
+  } else {
+    // This code path is taken on Windows 8 and earlier versions of
+    // the system which do not have proper VT/ANSI sequence parsing,
+    // so the input shouldn't have any ANSI color sequences here.
+
+    // We don't want to have the cursor spamming back and forth, so instead of
+    // printf use WriteConsoleOutput which updates the contents of the buffer,
+    // but doesn't move the cursor position.
+    COORD buf_size = { csbi.dwSize.X, 1 };
+    COORD zero_zero = { 0, 0 };
+    SMALL_RECT target = { csbi.dwCursorPosition.X, csbi.dwCursorPosition.Y,
+                          static_cast<SHORT>(csbi.dwCursorPosition.X +
+                                             csbi.dwSize.X - 1),
+                          csbi.dwCursorPosition.Y };
+    std::vector<CHAR_INFO> char_data(console_width);
+    for (size_t i = 0; i < console_width; ++i) {
+      char_data[i].Char.AsciiChar = i < to_print.size() ? to_print[i] : ' ';
+      char_data[i].Attributes = csbi.wAttributes;
+    }
+    WriteConsoleOutput(console_, &char_data[0], buf_size, zero_zero, &target);
+  }
+#else   // !_WIN32
+  // Limit output to width of the terminal if provided so we don't cause
+  // line-wrapping.
+  winsize size;
+  if ((ioctl(STDOUT_FILENO, TIOCGWINSZ, &size) == 0) && size.ws_col) {
+    ElideMiddleInPlace(to_print, size.ws_col);
+  }
+  printf("%s\x1B[K", to_print.c_str());  // Print + clear to end of line.
+  fflush(stdout);
+#endif  // !_WIN32
+
+  have_blank_line_ = false;
 }
 
 void LinePrinter::PrintOrBuffer(const char* data, size_t size) {
