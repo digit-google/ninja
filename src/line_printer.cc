@@ -20,6 +20,7 @@
 #include <windows.h>
 #ifndef ENABLE_VIRTUAL_TERMINAL_PROCESSING
 #define ENABLE_VIRTUAL_TERMINAL_PROCESSING 0x4
+#include <vector>
 #endif
 #else
 #include <unistd.h>
@@ -31,14 +32,12 @@
 #include "elide_middle.h"
 #include "util.h"
 
-using namespace std;
-
 LinePrinter::LinePrinter() {
   const char* term = getenv("TERM");
 #ifndef _WIN32
-  smart_terminal_ = isatty(1) && term && string(term) != "dumb";
+  smart_terminal_ = isatty(1) && term && std::string(term) != "dumb";
 #else
-  if (term && string(term) == "dumb") {
+  if (term && std::string(term) == "dumb") {
     smart_terminal_ = false;
   } else {
     console_ = GetStdHandle(STD_OUTPUT_HANDLE);
@@ -64,9 +63,9 @@ LinePrinter::LinePrinter() {
   }
 }
 
-void LinePrinter::Print(string to_print, LineType type) {
+void LinePrinter::Print(std::string to_print, LineType type) {
   if (console_locked_) {
-    line_buffer_ = to_print;
+    line_buffer_ = std::move(to_print);
     line_type_ = type;
     return;
   }
@@ -97,7 +96,7 @@ void LinePrinter::Print(string to_print, LineType type) {
                             static_cast<SHORT>(csbi.dwCursorPosition.X +
                                                csbi.dwSize.X - 1),
                             csbi.dwCursorPosition.Y };
-      vector<CHAR_INFO> char_data(csbi.dwSize.X);
+      std::vector<CHAR_INFO> char_data(csbi.dwSize.X);
       for (size_t i = 0; i < static_cast<size_t>(csbi.dwSize.X); ++i) {
         char_data[i].Char.AsciiChar = i < to_print.size() ? to_print[i] : ' ';
         char_data[i].Attributes = csbi.wAttributes;
@@ -133,7 +132,7 @@ void LinePrinter::PrintOrBuffer(const char* data, size_t size) {
   }
 }
 
-void LinePrinter::PrintOnNewLine(const string& to_print) {
+void LinePrinter::PrintOnNewLine(const std::string& to_print) {
   if (console_locked_ && !line_buffer_.empty()) {
     output_buffer_.append(line_buffer_);
     output_buffer_.append(1, '\n');
@@ -145,7 +144,7 @@ void LinePrinter::PrintOnNewLine(const string& to_print) {
   if (!to_print.empty()) {
     PrintOrBuffer(&to_print[0], to_print.size());
   }
-  have_blank_line_ = to_print.empty() || *to_print.rbegin() == '\n';
+  have_blank_line_ = to_print.empty() || to_print.back() == '\n';
 }
 
 void LinePrinter::SetConsoleLocked(bool locked) {
