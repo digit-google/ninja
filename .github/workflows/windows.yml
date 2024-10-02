@@ -23,7 +23,7 @@ jobs:
     - uses: actions/checkout@v4
 
     - name: Install dependencies
-      run: choco install re2c
+      run: choco install re2c python
 
     - name: Build ninja
       shell: bash
@@ -34,12 +34,16 @@ jobs:
 
     - name: Test ninja (Debug)
       if: matrix.arch != 'arm64'
-      run: .\ninja_test.exe
+      run: |
+         .\ninja_test.exe
+         python ..\..\misc\output_test.py
       working-directory: build/Debug
 
     - name: Test ninja (Release)
       if: matrix.arch != 'arm64'
-      run: .\ninja_test.exe
+      run: |
+         .\ninja_test.exe
+         python ..\..\misc\output_test.py
       working-directory: build/Release
 
     - name: Create ninja archive
