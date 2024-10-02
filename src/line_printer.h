@@ -23,15 +23,25 @@
 struct LinePrinter {
   LinePrinter();
 
+  /// True if this supports terminal control codes like CR (\r)
+  /// or clear-to-end-of-line (\x1b[K). Support for ANSI color
+  /// sequences should be tested with supports_color().
   bool is_smart_terminal() const { return smart_terminal_; }
+
+  /// Set the value of the smart terminal flag.
   void set_smart_terminal(bool smart) { smart_terminal_ = smart; }
 
+  /// True if this also supports ANSI color sequences (e.g. \x1b[34m)
+  /// If is assumed that smart terminals support them, except if
+  /// CLICOLOR_FORCE is set in the environment, or on Win32 systems
+  /// older than Windows 10.
   bool supports_color() const { return supports_color_; }
 
   enum LineType {
     FULL,
     ELIDE
   };
+
   /// Overprints the current line. If type is ELIDE, elides to_print to fit on
   /// one line.
   void Print(std::string to_print, LineType type);
@@ -45,28 +55,28 @@ struct LinePrinter {
 
  private:
   /// Whether we can do fancy terminal control codes.
-  bool smart_terminal_;
+  bool smart_terminal_ = false;
 
   /// Whether we can use ISO 6429 (ANSI) color sequences.
-  bool supports_color_;
+  bool supports_color_ = false;
 
   /// Whether the caret is at the beginning of a blank line.
-  bool have_blank_line_;
+  bool have_blank_line_ = true;
 
   /// Whether console is locked.
-  bool console_locked_;
+  bool console_locked_ = false;
 
   /// Buffered current line while console is locked.
   std::string line_buffer_;
 
   /// Buffered line type while console is locked.
-  LineType line_type_;
+  LineType line_type_ = FULL;
 
   /// Buffered console output while console is locked.
   std::string output_buffer_;
 
 #ifdef _WIN32
-  void* console_;
+  void* console_ = nullptr;
 #endif
 
   /// Print the given data to the console, or buffer it if it is locked.

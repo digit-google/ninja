@@ -33,7 +33,7 @@
 
 using namespace std;
 
-LinePrinter::LinePrinter() : have_blank_line_(true), console_locked_(false) {
+LinePrinter::LinePrinter() {
   const char* term = getenv("TERM");
 #ifndef _WIN32
   smart_terminal_ = isatty(1) && term && string(term) != "dumb";
