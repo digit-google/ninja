@@ -702,21 +702,62 @@ int NinjaMain::ToolWinCodePage(const Options* options, int argc, char* argv[]) {
 }
 #endif
 
-enum PrintCommandMode { PCM_Single, PCM_All };
-void PrintCommands(Edge* edge, EdgeSet* seen, PrintCommandMode mode) {
+enum class EvaluateCommandMode { NORMAL, EXPAND_RSPFILE };
+
+std::string EvaluateCommandWithRspfile(const Edge* edge,
+                                       const EvaluateCommandMode mode) {
+  std::string command = edge->EvaluateCommand();
+  if (mode == EvaluateCommandMode::NORMAL)
+    return command;
+
+  std::string rspfile = edge->GetUnescapedRspfile();
+  if (rspfile.empty())
+    return command;
+
+  size_t index = command.find(rspfile);
+  if (index == 0 || index == std::string::npos ||
+      (command[index - 1] != '@' &&
+       command.find("--option-file=") != index - 14 &&
+       command.find("-f ") != index - 3))
+    return command;
+
+  std::string rspfile_content = edge->GetBinding("rspfile_content");
+  size_t newline_index = 0;
+  while ((newline_index = rspfile_content.find('\n', newline_index)) !=
+         std::string::npos) {
+    rspfile_content.replace(newline_index, 1, 1, ' ');
+    ++newline_index;
+  }
+  if (command[index - 1] == '@') {
+    command.replace(index - 1, rspfile.length() + 1, rspfile_content);
+  } else if (command.find("-f ") == index - 3) {
+    command.replace(index - 3, rspfile.length() + 3, rspfile_content);
+  } else {  // --option-file syntax
+    command.replace(index - 14, rspfile.length() + 14, rspfile_content);
+  }
+  return command;
+}
+
+enum class PrintCommandMode {
+  SINGLE,
+  ALL,
+};
+
+void PrintCommands(Edge* edge, EdgeSet* seen, PrintCommandMode print_mode,
+                   EvaluateCommandMode eval_mode) {
   if (!edge)
     return;
   if (!seen->insert(edge).second)
     return;
 
-  if (mode == PCM_All) {
-    for (vector<Node*>::iterator in = edge->inputs_.begin();
-         in != edge->inputs_.end(); ++in)
-      PrintCommands((*in)->in_edge(), seen, mode);
+  if (print_mode == PrintCommandMode::ALL) {
+    for (const Node* input : edge->inputs_)
+      PrintCommands(input->in_edge(), seen, print_mode, eval_mode);
   }
 
-  if (!edge->is_phony())
-    puts(edge->EvaluateCommand().c_str());
+  if (!edge->is_phony()) {
+    puts(EvaluateCommandWithRspfile(edge, eval_mode).c_str());
+  }
 }
 
 int NinjaMain::ToolCommands(const Options* options, int argc, char* argv[]) {
@@ -725,38 +766,44 @@ int NinjaMain::ToolCommands(const Options* options, int argc, char* argv[]) {
   ++argc;
   --argv;
 
-  PrintCommandMode mode = PCM_All;
+  PrintCommandMode mode = PrintCommandMode::ALL;
 
+  EvaluateCommandMode eval_mode = EvaluateCommandMode::NORMAL;
   optind = 1;
   int opt;
-  while ((opt = getopt(argc, argv, const_cast<char*>("hs"))) != -1) {
+  while ((opt = getopt(argc, argv, const_cast<char*>("hxs"))) != -1) {
     switch (opt) {
+    case 'x':
+      eval_mode = EvaluateCommandMode::EXPAND_RSPFILE;
+      break;
     case 's':
-      mode = PCM_Single;
+      mode = PrintCommandMode::SINGLE;
       break;
     case 'h':
     default:
-      printf("usage: ninja -t commands [options] [targets]\n"
-"\n"
-"options:\n"
-"  -s     only print the final command to build [target], not the whole chain\n"
-             );
-    return 1;
+      printf(
+          "usage: ninja -t commands [options] [targets]\n"
+          "\n"
+          "options:\n"
+          "  -s     only print the final command to build [target], not the "
+          "whole chain\n"
+          "  -x     include response file content in commands.\n");
+      return 1;
     }
   }
   argv += optind;
   argc -= optind;
 
-  vector<Node*> nodes;
-  string err;
+  std::vector<Node*> nodes;
+  std::string err;
   if (!CollectTargetsFromArgs(argc, argv, &nodes, &err)) {
     Error("%s", err.c_str());
     return 1;
   }
 
   EdgeSet seen;
-  for (vector<Node*>::iterator in = nodes.begin(); in != nodes.end(); ++in)
-    PrintCommands((*in)->in_edge(), &seen, mode);
+  for (const Node* node : nodes)
+    PrintCommands(node->in_edge(), &seen, mode, eval_mode);
 
   return 0;
 }
@@ -894,44 +941,6 @@ int NinjaMain::ToolCleanDead(const Options* options, int argc, char* argv[]) {
   return cleaner.CleanDead(build_log_.entries());
 }
 
-enum EvaluateCommandMode {
-  ECM_NORMAL,
-  ECM_EXPAND_RSPFILE
-};
-std::string EvaluateCommandWithRspfile(const Edge* edge,
-                                       const EvaluateCommandMode mode) {
-  string command = edge->EvaluateCommand();
-  if (mode == ECM_NORMAL)
-    return command;
-
-  string rspfile = edge->GetUnescapedRspfile();
-  if (rspfile.empty())
-    return command;
-
-  size_t index = command.find(rspfile);
-  if (index == 0 || index == string::npos ||
-      (command[index - 1] != '@' &&
-       command.find("--option-file=") != index - 14 &&
-       command.find("-f ") != index - 3))
-    return command;
-
-  string rspfile_content = edge->GetBinding("rspfile_content");
-  size_t newline_index = 0;
-  while ((newline_index = rspfile_content.find('\n', newline_index)) !=
-         string::npos) {
-    rspfile_content.replace(newline_index, 1, 1, ' ');
-    ++newline_index;
-  }
-  if (command[index - 1] == '@') {
-    command.replace(index - 1, rspfile.length() + 1, rspfile_content);
-  } else if (command.find("-f ") == index - 3) {
-    command.replace(index - 3, rspfile.length() + 3, rspfile_content);
-  } else {  // --option-file syntax
-    command.replace(index - 14, rspfile.length() + 14, rspfile_content);
-  }
-  return command;
-}
-
 void printCompdb(const char* const directory, const Edge* const edge,
                  const EvaluateCommandMode eval_mode) {
   printf("\n  {\n    \"directory\": \"");
@@ -952,14 +961,14 @@ int NinjaMain::ToolCompilationDatabase(const Options* options, int argc,
   argc++;
   argv--;
 
-  EvaluateCommandMode eval_mode = ECM_NORMAL;
+  EvaluateCommandMode eval_mode = EvaluateCommandMode::NORMAL;
 
   optind = 1;
   int opt;
   while ((opt = getopt(argc, argv, const_cast<char*>("hx"))) != -1) {
     switch(opt) {
       case 'x':
-        eval_mode = ECM_EXPAND_RSPFILE;
+        eval_mode = EvaluateCommandMode::EXPAND_RSPFILE;
         break;
 
       case 'h':

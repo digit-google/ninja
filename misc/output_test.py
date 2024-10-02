@@ -401,5 +401,93 @@ out 2
                 [1/3] [ -e input ] || touch input
                 '''))
 
+    def test_tool_commands(self):
+        b = BuildDir('''\
+            rule cmd_with_at_rsp
+                command = run_command @${rspfile} > $out
+                rspfile = $out.rspfile
+                rspfile_content = $in
+
+            rule cmd_with_f_rsp
+                command = run_command -f ${rspfile} > $out
+                rspfile = $out.rspfile
+                rspfile_content = $in
+
+            rule cmd_with_option_file_rsp
+                command = run_command --option-file=${rspfile} > $out
+                rspfile = $out.rspfile
+                rspfile_content = $in
+
+            build foo: cmd_with_at_rsp input1
+            build bar: cmd_with_f_rsp foo
+            build zoo: cmd_with_option_file_rsp foo
+            build all: phony foo bar zoo
+            default all
+            ''')
+        with b:
+            # print all commands for default target, no rsp expansion.
+            self.assertEqual(b.run('-t commands'),
+                             'run_command @foo.rspfile > foo\n' +
+                             'run_command -f bar.rspfile > bar\n' +
+                             "run_command --option-file=zoo.rspfile > zoo\n")
+
+            # print all commands for 'foo', no expansion.
+            self.assertEqual(b.run('-t commands foo'),
+                             'run_command @foo.rspfile > foo\n')
+
+            # print all commands for 'bar', no expansion.
+            self.assertEqual(b.run('-t commands bar'),
+                             'run_command @foo.rspfile > foo\n' +
+                             'run_command -f bar.rspfile > bar\n')
+
+            # print all commands for 'zoo', no expansion.
+            self.assertEqual(b.run('-t commands zoo'),
+                             'run_command @foo.rspfile > foo\n' +
+                             'run_command --option-file=zoo.rspfile > zoo\n')
+
+            # print all commands for default target,  with rsp expansion
+            self.assertEqual(b.run('-t commands -x '),
+                             'run_command input1 > foo\n' +
+                             'run_command foo > bar\n' +
+                             "run_command foo > zoo\n")
+
+            # print all commands for 'foo', with rsp expansion
+            self.assertEqual(b.run('-t commands -x foo'),
+                             'run_command input1 > foo\n')
+
+            # print all commands for 'bar', with rsp expansion
+            self.assertEqual(b.run('-t commands -x bar'),
+                             'run_command input1 > foo\n' +
+                             'run_command foo > bar\n')
+
+            # print all commands for 'zoo', with rsp expansion
+            self.assertEqual(b.run('-t commands -x zoo'),
+                             'run_command input1 > foo\n' +
+                             'run_command foo > zoo\n')
+
+            # print command for default target, empty as it is phony.
+            self.assertEqual(b.run('-t commands -s'), '')
+
+            # print command for foo, no rsp expansion.
+            self.assertEqual(b.run('-t commands -s foo'),
+                             'run_command @foo.rspfile > foo\n')
+
+            # print command for bar, no rsp expansion.
+            self.assertEqual(b.run('-t commands -s bar'),
+                             'run_command -f bar.rspfile > bar\n')
+
+            # print command for foo, with rsp expansion.
+            self.assertEqual(b.run('-t commands -sx foo'),
+                             'run_command input1 > foo\n')
+
+            # print command for bar, with rsp expansion.
+            self.assertEqual(b.run('-t commands -sx bar'),
+                             'run_command foo > bar\n')
+
+            # print command for zoo, with rsp expansion.
+            self.assertEqual(b.run('-t commands -sx zoo'),
+                             'run_command foo > zoo\n')
+
+
 if __name__ == '__main__':
     unittest.main()
