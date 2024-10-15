@@ -148,6 +148,7 @@ add_library(libninja OBJECT
 	src/real_command_runner.cc
 	src/state.cc
 	src/status_printer.cc
+	src/status_table.cc
 	src/string_piece_util.cc
 	src/util.cc
 	src/version.cc
@@ -283,6 +284,7 @@ if(BUILD_TESTING)
     src/missing_deps_test.cc
     src/ninja_test.cc
     src/state_test.cc
+    src/status_table_test.cc
     src/string_piece_util_test.cc
     src/subprocess_test.cc
     src/test.cc
