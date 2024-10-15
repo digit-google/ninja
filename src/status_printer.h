@@ -14,6 +14,7 @@
 #pragma once
 
 #include <cstdint>
+#include <memory>
 #include <queue>
 
 #include "exit_status.h"
@@ -25,6 +26,7 @@
 /// human-readable strings to stdout
 struct StatusPrinter : Status {
   explicit StatusPrinter(const BuildConfig& config);
+  virtual ~StatusPrinter();
 
   /// Callbacks for the Plan to notify us about adding/removing Edge's.
   void EdgeAddedToPlan(const Edge* edge) override;
@@ -134,4 +136,8 @@ struct StatusPrinter : Status {
   };
 
   mutable SlidingRateInfo current_rate_;
+
+  // Optional commands table for interactive terminals.
+  struct StatusPrinterTable;
+  std::unique_ptr<StatusPrinterTable> table_;
 };
