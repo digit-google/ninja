@@ -18,6 +18,10 @@ default_env = dict(os.environ)
 default_env.pop('NINJA_STATUS', None)
 default_env.pop('NINJA_STATUS_REFRESH_MILLIS', None)
 default_env.pop('CLICOLOR_FORCE', None)
+
+# Explicitly disable commands table feature for these tests.
+default_env['NINJA_STATUS_MAX_COMMANDS'] = '0'
+
 default_env['TERM'] = ''
 NINJA_PATH = os.path.abspath('./ninja')
 

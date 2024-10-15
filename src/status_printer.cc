@@ -33,12 +33,44 @@
 
 #include "build.h"
 #include "debug_flags.h"
+#include "status_table.h"
+
+namespace {
+
+// Return a command's description or its full command if its empty.
+std::string GetCommandDescription(const Edge* edge,
+                                  bool force_full_command = false) {
+  std::string description = edge->GetBinding("description");
+  if (description.empty() || force_full_command)
+    description = edge->GetBinding("command");
+  return description;
+}
+
+}  // namespace
 
 using namespace std;
 
 Status* Status::factory(const BuildConfig& config) {
   return new StatusPrinter(config);
 }
+
+StatusPrinter::~StatusPrinter() {}
+
+// Derived StatusTable class that uses a LinePrinter to print to
+// smart terminals.
+struct StatusPrinter::StatusPrinterTable : public StatusTable {
+  StatusPrinterTable(StatusPrinter& status_printer,
+                     const StatusTable::Config& config)
+      : StatusTable(config), status_printer_(status_printer) {}
+
+  virtual ~StatusPrinterTable() {}
+
+  void PrintOnCurrentLine(const std::string& line) override {
+    status_printer_.printer_.Print(line, LinePrinter::ELIDE);
+  }
+
+  StatusPrinter& status_printer_;
+};
 
 StatusPrinter::StatusPrinter(const BuildConfig& config)
     : config_(config), started_edges_(0), finished_edges_(0), total_edges_(0),
@@ -51,6 +83,26 @@ StatusPrinter::StatusPrinter(const BuildConfig& config)
   progress_status_format_ = getenv("NINJA_STATUS");
   if (!progress_status_format_)
     progress_status_format_ = "[%f/%t] ";
+
+  if (printer_.is_smart_terminal() && !config_.dry_run) {
+    StatusTable::Config table_config = {};
+
+    if (config_.status_max_commands > 0) {
+      table_config.max_commands =
+          static_cast<size_t>(config_.status_max_commands);
+    }
+
+    // Since elapsed times are displayed to the first decimal digit
+    // only, there is no point in using a value smaller than 0.1 seconds
+    // for the refresh timeout.
+    const long timeout_millis_min = 100;
+    long timeout_millis = config_.status_refresh_millis;
+    if (timeout_millis < timeout_millis_min)
+      timeout_millis = timeout_millis_min;
+    table_config.refresh_timeout_ms = static_cast<int64_t>(timeout_millis);
+
+    table_.reset(new StatusPrinterTable(*this, table_config));
+  }
 }
 
 void StatusPrinter::EdgeAddedToPlan(const Edge* edge) {
@@ -87,11 +139,23 @@ void StatusPrinter::BuildEdgeStarted(const Edge* edge,
   ++running_edges_;
   time_millis_ = start_time_millis;
 
-  if (edge->use_console() || printer_.is_smart_terminal())
-    PrintStatus(edge, start_time_millis);
+  if (table_)
+    table_->CommandStarted(edge, start_time_millis,
+                           GetCommandDescription(edge));
 
-  if (edge->use_console())
+  if (edge->use_console()) {
+    // This command will print its output directly to stdout, so
+    // clear the commands to let Ninja update the status and
+    // lock the line printer.
+    if (table_)
+      table_->ClearTable();
+    PrintStatus(edge, start_time_millis);
     printer_.SetConsoleLocked(true);
+  } else if (printer_.is_smart_terminal()) {
+    PrintStatus(edge, start_time_millis);
+    if (table_)
+      table_->UpdateTable(start_time_millis);
+  }
 }
 
 void StatusPrinter::RecalculateProgressPrediction() {
@@ -190,23 +254,38 @@ void StatusPrinter::BuildEdgeFinished(Edge* edge, int64_t start_time_millis,
   } else
     --eta_unpredictable_edges_remaining_;
 
+  if (table_)
+    table_->CommandEnded(edge);
+
+  --running_edges_;
+
   if (edge->use_console())
     printer_.SetConsoleLocked(false);
 
   if (config_.verbosity == BuildConfig::QUIET)
     return;
 
-  if (!edge->use_console())
+  if (!edge->use_console()) {
     PrintStatus(edge, end_time_millis);
+    if (success && output.empty()) {
+      // Ninja doesn't need to print command output or error
+      // to the terminal, so update the table if needed, then
+      // exit.
+      if (table_)
+        table_->UpdateTable(end_time_millis);
+      return;
+    }
+  }
 
-  --running_edges_;
+  // Clear commands table, since Ninja is going to print something.
+  if (table_)
+    table_->ClearTable();
 
   // Print the command that is spewing before printing its output.
   if (!success) {
-    string outputs;
-    for (vector<Node*>::const_iterator o = edge->outputs_.begin();
-         o != edge->outputs_.end(); ++o)
-      outputs += (*o)->path() + " ";
+    std::string outputs;
+    for (const Node* out : edge->outputs_)
+      outputs += out->path() + " ";
 
     if (printer_.supports_color()) {
         printer_.PrintOnNewLine("\x1B[31m" "FAILED: " "\x1B[0m" + outputs + "\n");
@@ -252,9 +331,15 @@ void StatusPrinter::BuildStarted() {
   started_edges_ = 0;
   finished_edges_ = 0;
   running_edges_ = 0;
+
+  if (table_)
+    table_->BuildStarted();
 }
 
 void StatusPrinter::BuildFinished() {
+  if (table_)
+    table_->BuildEnded();
+
   printer_.SetConsoleLocked(false);
   printer_.PrintOnNewLine("");
 }
@@ -428,10 +513,7 @@ void StatusPrinter::PrintStatus(const Edge* edge, int64_t time_millis) {
 
   bool force_full_command = config_.verbosity == BuildConfig::VERBOSE;
 
-  last_description_ = edge->GetBinding("description");
-  if (last_description_.empty() || force_full_command)
-    last_description_ = edge->GetBinding("command");
-
+  last_description_ = GetCommandDescription(edge, force_full_command);
   RefreshStatus(time_millis, force_full_command);
 }
 
@@ -442,11 +524,16 @@ void StatusPrinter::RefreshStatus(int64_t cur_time_millis,
       last_description_;
   printer_.Print(to_print,
                  force_full_command ? LinePrinter::FULL : LinePrinter::ELIDE);
+
+  if (table_)
+    table_->SetStatus(to_print);
 }
 
 void StatusPrinter::Refresh(int64_t cur_time_millis) {
   if (printer_.is_smart_terminal()) {
     RefreshStatus(cur_time_millis, false);
+    if (table_)
+      table_->UpdateTable(cur_time_millis);
   }
 }
 

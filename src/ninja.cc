@@ -1729,9 +1729,18 @@ NORETURN void real_main(int argc, char** argv) {
   Options options = {};
   options.input_file = "build.ninja";
 
+  const char* status_max_commands_env = getenv("NINJA_STATUS_MAX_COMMANDS");
+  if (status_max_commands_env) {
+    config.status_max_commands = atoi(status_max_commands_env);
+  }
   const char* status_refresh_env = getenv("NINJA_STATUS_REFRESH_MILLIS");
   if (status_refresh_env) {
     config.status_refresh_millis = atoi(status_refresh_env);
+  } else if (config.status_max_commands <= 0) {
+    // Since the time-sensitive formatters only have a granularity
+    // of one second, change the default refresh timeout to 1000,
+    // to avoid reprinting the exact same status every 0.1s.
+    config.status_refresh_millis = 1000;
   }
 
   setvbuf(stdout, NULL, _IOLBF, BUFSIZ);

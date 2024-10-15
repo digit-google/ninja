@@ -193,7 +193,10 @@ struct BuildConfig {
   double max_load_average = -0.0f;
   /// Number of milliseconds between status refreshes in interactive
   /// terminals.
-  int status_refresh_millis = 1000;
+  int status_refresh_millis = 100;
+  /// Number of commands displayed in the table in interactive
+  /// terminals. Set to 0 or a negative value to disable the feature.
+  int status_max_commands = 4;
   DepfileParserOptions depfile_parser_options;
 };
 
