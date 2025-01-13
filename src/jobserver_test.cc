@@ -40,6 +40,66 @@ struct ScopedTestFd {
 
 }  // namespace
 
+TEST(Jobserver, ModeToString) {
+  static const struct {
+    Jobserver::Config::Mode mode;
+    const char* expected;
+  } kTestCases[] = {
+    { Jobserver::Config::kModeNone, "none" },
+    { Jobserver::Config::kModePipe, "pipe" },
+    { Jobserver::Config::kModePosixFifo, "fifo" },
+    { Jobserver::Config::kModeWin32Semaphore, "sem" },
+  };
+  for (const auto& test_case : kTestCases) {
+    EXPECT_EQ(Jobserver::Config::ModeToString(test_case.mode),
+              test_case.expected)
+        << test_case.mode;
+  }
+}
+
+TEST(Jobserver, ModeFromString) {
+  static const struct {
+    const char* input;
+    bool expected_first;
+    Jobserver::Config::Mode expected_second;
+  } kSuccessCases[] = {
+    { "none", true, Jobserver::Config::kModeNone },
+    { "pipe", true, Jobserver::Config::kModePipe },
+    { "fifo", true, Jobserver::Config::kModePosixFifo },
+    { "sem", true, Jobserver::Config::kModeWin32Semaphore },
+    { "0", true, Jobserver::Config::kModeNone },
+    { "1", true, Jobserver::Config::kModeDefault },
+    { "", false, Jobserver::Config::kModeNone },
+    { "unknown", false, Jobserver::Config::kModeNone },
+  };
+  for (const auto& test_case : kSuccessCases) {
+    auto ret = Jobserver::Config::ModeFromString(test_case.input);
+    EXPECT_EQ(ret.first, test_case.expected_first) << test_case.input;
+    EXPECT_EQ(ret.second, test_case.expected_second) << test_case.input;
+  }
+}
+
+TEST(Jobserver, GetValidModesListAsString) {
+  EXPECT_EQ("none pipe fifo sem 0 1",
+            Jobserver::Config::GetValidModesListAsString());
+  EXPECT_EQ("none, pipe, fifo, sem, 0, 1",
+            Jobserver::Config::GetValidModesListAsString(", "));
+}
+
+TEST(Jobserver, GetValidNativeModesListAsString) {
+#ifdef _WIN32
+  EXPECT_EQ("none sem 0 1",
+            Jobserver::Config::GetValidNativeModesListAsString());
+  EXPECT_EQ("none, sem, 0, 1",
+            Jobserver::Config::GetValidNativeModesListAsString(", "));
+#else   // !_WIN32
+  EXPECT_EQ("none pipe fifo 0 1",
+            Jobserver::Config::GetValidNativeModesListAsString());
+  EXPECT_EQ("none, pipe, fifo, 0, 1",
+            Jobserver::Config::GetValidNativeModesListAsString(", "));
+#endif  // !_WIN32
+}
+
 TEST(Jobserver, SlotTest) {
   // Default construction.
   Jobserver::Slot slot;

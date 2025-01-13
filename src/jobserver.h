@@ -138,6 +138,28 @@ struct Jobserver {
 #endif  // _WIN32
     };
 
+    /// Convert a mode value into an equivalent string value.
+    /// Useful for debugging and error messages.
+    static std::string ModeToString(Mode mode);
+
+    /// Convert a string into the equivalent Mode value.
+    /// On success, return (true, <mode>), on failure,
+    /// return (false, kModeNone). NOTE: As a special case,
+    /// this also accepts "0" for kModeNone. and "1" for kModeDefault
+    /// which is useful when reading the value from an environment
+    /// variable.
+    static std::pair<bool, Mode> ModeFromString(const std::string& str);
+
+    /// Return the list of valid modes as a space-separated string.
+    /// Allow using a custom separator. This includes "0" and "1" as
+    /// aliases for kModeNone and kModeDefault.
+    static std::string GetValidModesListAsString(const char* separator = " ");
+
+    /// Same as GetValidModesListAsString(), but only returns values
+    /// valid for the current system.
+    static std::string GetValidNativeModesListAsString(
+        const char* separator = " ");
+
     /// Implementation mode for the pool.
     Mode mode = kModeNone;
 
