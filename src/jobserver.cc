@@ -54,6 +54,30 @@ bool GetFileDescriptorPair(StringPiece input, Jobserver::Config* config) {
   return true;
 }
 
+enum SupportedSystem {
+  kSystemAll = 0,
+  kSystemPosix,
+  kSystemWin32,
+#ifdef _WIN32
+  kSystemCurrent = kSystemWin32,
+#else   // !_WIN32
+  kSystemCurrent = kSystemPosix,
+#endif  // !_WIN32
+};
+
+static const struct {
+  const char* mode_str;
+  Jobserver::Config::Mode mode_value;
+  SupportedSystem system;
+} kValidModes[] = {
+  { "none", Jobserver::Config::kModeNone, kSystemAll },
+  { "pipe", Jobserver::Config::kModePipe, kSystemPosix },
+  { "fifo", Jobserver::Config::kModePosixFifo, kSystemPosix },
+  { "sem", Jobserver::Config::kModeWin32Semaphore, kSystemWin32 },
+  { "0", Jobserver::Config::kModeNone, kSystemAll },
+  { "1", Jobserver::Config::kModeDefault, kSystemAll },
+};
+
 }  // namespace
 
 // static
@@ -204,4 +228,55 @@ bool Jobserver::ParseNativeMakeFlagsValue(const char* makeflags_env,
   }
 #endif  // !_WIN32
   return true;
+}
+
+// static
+std::string Jobserver::Config::ModeToString(Jobserver::Config::Mode mode) {
+  std::string result;
+  for (const auto& valid : kValidModes) {
+    if (valid.mode_value == mode) {
+      result = valid.mode_str;
+      break;
+    }
+  }
+  return result;
+}
+
+std::pair<bool, Jobserver::Config::Mode> Jobserver::Config::ModeFromString(
+    const std::string& mode_str) {
+  std::pair<bool, Jobserver::Config::Mode> result = {
+    false, Jobserver::Config::kModeNone
+  };
+  for (const auto& valid : kValidModes) {
+    if (mode_str == valid.mode_str) {
+      result.first = true;
+      result.second = valid.mode_value;
+      break;
+    }
+  }
+  return result;
+}
+
+std::string Jobserver::Config::GetValidModesListAsString(
+    const char* separator) {
+  std::string result;
+  for (const auto& valid : kValidModes) {
+    if (!result.empty())
+      result += separator;
+    result += valid.mode_str;
+  }
+  return result;
+}
+
+std::string Jobserver::Config::GetValidNativeModesListAsString(
+    const char* separator) {
+  std::string result;
+  for (const auto& valid : kValidModes) {
+    if (valid.system != kSystemAll && valid.system != kSystemCurrent)
+      continue;
+    if (!result.empty())
+      result += separator;
+    result += valid.mode_str;
+  }
+  return result;
 }
