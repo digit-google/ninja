@@ -397,7 +397,8 @@ struct EdgeEnv : public Env {
 
   /// Given a span of Nodes, construct a list of paths suitable for a command
   /// line.
-  std::string MakePathList(const Node* const* span, size_t size, char sep) const;
+  std::string MakePathList(const Node* const* span, size_t size,
+                           StringPiece sep) const;
 
  private:
   std::vector<std::string> lookups_;
@@ -408,13 +409,20 @@ struct EdgeEnv : public Env {
 
 string EdgeEnv::LookupVariable(const string& var) {
   if (var == "in" || var == "in_newline") {
-    int explicit_deps_count = edge_->inputs_.size() - edge_->implicit_deps_ -
-      edge_->order_only_deps_;
-    return MakePathList(edge_->inputs_.data(), explicit_deps_count,
-                        var == "in" ? ' ' : '\n');
+    int explicit_deps_count =
+        static_cast<int>(edge_->inputs_.size() - edge_->implicit_deps_ -
+                         edge_->order_only_deps_);
+    StringPiece separator = (var == "in") ? " " :
+#ifdef _WIN32
+                                          "\r\n";
+#else   // !_WIN32
+                                          "\n";
+#endif  // !_WIN32
+    return MakePathList(edge_->inputs_.data(), explicit_deps_count, separator);
   } else if (var == "out") {
-    int explicit_outs_count = edge_->outputs_.size() - edge_->implicit_outs_;
-    return MakePathList(&edge_->outputs_[0], explicit_outs_count, ' ');
+    int explicit_outs_count =
+        static_cast<int>(edge_->outputs_.size() - edge_->implicit_outs_);
+    return MakePathList(&edge_->outputs_[0], explicit_outs_count, " ");
   }
 
   // Technical note about the lookups_ vector.
@@ -477,12 +485,12 @@ string EdgeEnv::LookupVariable(const string& var) {
 }
 
 std::string EdgeEnv::MakePathList(const Node* const* const span,
-                                  const size_t size, const char sep) const {
-  string result;
+                                  const size_t size, StringPiece sep) const {
+  std::string result;
   for (const Node* const* i = span; i != span + size; ++i) {
     if (!result.empty())
-      result.push_back(sep);
-    const string& path = (*i)->PathDecanonicalized();
+      result.append(sep.str_, sep.len_);
+    std::string path = (*i)->PathDecanonicalized();
     if (escape_in_out_ == kShellEscape) {
 #ifdef _WIN32
       GetWin32EscapedString(path, &result);

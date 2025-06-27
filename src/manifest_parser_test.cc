@@ -140,7 +140,11 @@ TEST_F(ParserTest, InNewline) {
             rule->GetBinding("command")->Serialize());
 
   Edge* edge = state.edges_[0];
+#ifdef _WIN32
+  EXPECT_EQ("cat in\r\nin2 > out", edge->EvaluateCommand());
+#else   // !_WIN32
   EXPECT_EQ("cat in\nin2 > out", edge->EvaluateCommand());
+#endif  // !_WIN32
 }
 
 TEST_F(ParserTest, Variables) {

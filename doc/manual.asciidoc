@@ -1010,9 +1010,10 @@ keys.
   that instead.)
 
 `in_newline`:: the same as `$in` except that multiple inputs are
-  separated by newlines rather than spaces.  (For use with
-  `$rspfile_content`; this works around a bug in the MSVC linker where
-  it uses a fixed-size buffer for processing input.)
+  separated by newlines rather than spaces. This uses `\r\n` on Windows,
+  and `\n` on other systems (For use with `$rspfile_content`; this works around
+  a bug in the MSVC linker where it uses a fixed-size buffer for processing
+  input.)
 
 `out`:: the space-separated list of files provided as outputs to the build line
   referencing this `rule`, shell-quoted if it appears in commands.
