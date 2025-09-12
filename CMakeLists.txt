@@ -249,6 +249,11 @@ if(platform_supports_ninja_browse)
 	)
 endif()
 
+if (WIN32)
+  add_executable(ninja_fake_win32_compiler misc/fake_win32_compiler.cc)
+  target_sources(ninja_fake_win32_compiler PRIVATE windows/ninja.manifest)
+endif()
+
 include(CTest)
 if(BUILD_TESTING)
 

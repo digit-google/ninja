@@ -895,6 +895,8 @@ bool Builder::FinishCommand(CommandRunner::Result* result, string* err) {
         result->output.append("\n");
       result->output.append(extract_err);
       result->status = ExitFailure;
+    } else if (!result->success()) {
+      fprintf(stderr, "PARSING ERROR: [%s]\n", extract_err.c_str());
     }
   }
 
@@ -989,8 +991,13 @@ bool Builder::ExtractDeps(CommandRunner::Result* result,
   if (deps_type == "msvc") {
     CLParser parser;
     string output;
-    if (!parser.Parse(result->output, deps_prefix, &output, err))
+    fprintf(stderr, "\nENTERING MSVC PARSER\n");
+    fprintf(stderr, "OUTPUT [%s]\n", result->output.c_str());
+    if (!parser.Parse(result->output, deps_prefix, &output, err)) {
+      fprintf(stderr, "parser.Parse(): %s\n", err->c_str());
       return false;
+    }
+    fprintf(stderr, "FOUND %zd DEPS\n", parser.includes_.size());
     result->output = output;
     for (set<string>::iterator i = parser.includes_.begin();
          i != parser.includes_.end(); ++i) {
@@ -998,6 +1005,7 @@ bool Builder::ExtractDeps(CommandRunner::Result* result,
       // all backslashes (as some of the slashes will certainly be backslashes
       // anyway). This could be fixed if necessary with some additional
       // complexity in IncludesNormalize::Relativize.
+      fprintf(stderr, "FOUND DEP: %s\n", (*i).c_str());
       deps_nodes->push_back(state_->GetNode(*i, ~0u));
     }
   } else if (deps_type == "gcc") {

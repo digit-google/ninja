@@ -97,6 +97,14 @@ bool CLParser::Parse(const string& output, const string& deps_prefix,
 
     string include = FilterShowIncludes(line, deps_prefix);
     if (!include.empty()) {
+      fprintf(stderr, "INCLUDE [");
+      for (char ch : include) {
+        if (ch < 32 || ch >= 127)
+          fprintf(stderr, "\\x%02x", ch);
+        else
+          fprintf(stderr, "%c", ch);
+      }
+      fprintf(stderr, "]\n");
       seen_show_includes = true;
       string normalized;
 #ifdef _WIN32
