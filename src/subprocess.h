@@ -46,51 +46,122 @@ struct Subprocess {
   /// the process was interrupted, ExitFailure if it otherwise failed.
   ExitStatus Finish();
 
+  void OnPipeReady();
   bool Done() const;
 
+  /// Retrieve the command's combined stdout and stderr
   const std::string& GetOutput() const;
+
+  /// Retrieve the command's stdout only.
+  const std::string& GetStdout() const;
+
+  /// Retrieve the command's stderr only.
+  const std::string& GetStderr() const;
 
  private:
   Subprocess(bool use_console);
   bool Start(struct SubprocessSet* set, const std::string& command);
-  void OnPipeReady();
 
-  std::string buf_;
+  /// The combined stdout + stderr output, note that this mixes
+  /// both streams in unpredictable ways. This is maintained here
+  /// in case some developer workflows depend on it.
+  std::string combined_output_;
 
 #ifdef _WIN32
-  /// Set up pipe_ as the parent-side pipe of the subprocess; return the
-  /// other end of the pipe, usable in the child process.
-  HANDLE SetupPipe(HANDLE ioport);
+  /// Models a single stdout or stderr buffer receiving data from
+  /// the child process. Usage is:
+  ///
+  ///  1) Create instance.
+  ///
+  ///  2) Call Setup() to create the corresponding pipe and return
+  ///     its write handle to be sent to the client in CreateProcess().
+  ///
+  ///     The pipe's read handle is stored in the instance, and a new
+  ///     asynchronous connection i/o operation is started on it.
+  ///
+  ///  3) When the I/O Completion port receives a completion for the
+  ///     subprocess, find which OutputPipe.overlapped_ address matches
+  ///     it, then call OnPipeReady() on the corresponding instance.
+  struct OutputPipe {
+    /// Close instance on destruction.
+    ~OutputPipe() { Close(); }
 
-  HANDLE child_;
-  HANDLE pipe_;
-  OVERLAPPED overlapped_;
-  char overlapped_buf_[4 << 10];
-  bool is_reading_;
-#else
-  /// The file descriptor that will be used in ppoll/pselect() for this process,
-  /// if any. Otherwise -1.
-  /// In non-console mode, this is the read-side of a pipe that was created
-  /// specifically for this subprocess. The write-side of the pipe is given to
-  /// the subprocess as combined stdout and stderr.
-  /// In console mode no pipe is created: fd_ is -1, and process termination is
-  /// detected using the SIGCHLD signal and waitpid(WNOHANG).
-  int fd_;
+    /// Set up pipe as the parent-side pipe of the subprocess; return the
+    /// other end of the pipe, usable in the child process. @arg ioport
+    /// is the handle of an I/O Completion port that will receive events
+    /// when data arrives on the read end of the pipe. @arg subproc is
+    /// the Subprocess instance this OutputPipe belongs to.
+    HANDLE Setup(HANDLE ioport, Subprocess* subproc);
+
+    /// Close pipe read-end.
+    void Close();
+
+    /// Return true if this pipe is closed.
+    bool IsClosed() const { return pipe_ == INVALID_HANDLE_VALUE; }
+
+    /// Called when an i/o request completed for this pipe.
+    /// The first one corresponds to the child process connecting to
+    /// the pipe, while all other ones corresponds to output data
+    /// arriving on the read handle or an error corresponding to the
+    /// child process closing the pipe. Automatically restarts an
+    /// async Read() i/o operation when needed.
+    void OnPipeReady();
+
+    Subprocess* subproc_ = nullptr;
+    HANDLE pipe_ = INVALID_HANDLE_VALUE;
+    bool is_reading_ = false;
+    std::string buf_;
+    OVERLAPPED overlapped_ = {};
+    char overlapped_buf_[4 << 10];
+  };
+
+  /// Child process handle.
+  HANDLE child_ = NULL;
+
+  /// OutputPipe instance for the child's stdout and stderr streams.
+  /// Only used when use_console_ is false.
+  OutputPipe stdout_pipe_;
+  OutputPipe stderr_pipe_;
+#else   // !_WIN32
+
+  /// A version of OutputPipe for Posix, usage is similar to its Win32 version.
+  struct OutputPipe {
+    ~OutputPipe() { Close(); }
+    int Setup(Subprocess* subproc);
+    void OnPipeReady();
+    void Close();
+    bool IsClosed() const { return fd_ == -1; }
+
+    int fd_ = -1;
+    std::string buf_;
+    Subprocess* subproc_ = nullptr;
+  };
+
+  /// Output buffer for non-console subprocesses. Ignored if use_console_ is
+  /// false.
+  OutputPipe stdout_pipe_;
+  OutputPipe stderr_pipe_;
+
   /// PID of the subprocess. Set to -1 when the subprocess is reaped.
-  pid_t pid_;
+  pid_t pid_ = -1;
+
   /// In POSIX platforms it is necessary to use waitpid(WNOHANG) to know whether
   /// a certain subprocess has finished. This is done for terminal subprocesses.
   /// However, this also causes the subprocess to be reaped before Finish() is
   /// called, so we need to store the ExitStatus so that a later Finish()
   /// invocation can return it.
-  ExitStatus exit_status_;
+  ExitStatus exit_status_ = ExitSuccess;
 
   /// Call waitpid() on the subprocess with the provided options and update the
   /// pid_ and exit_status_ fields.
   /// Return a boolean indicating whether the subprocess has indeed terminated.
   bool TryFinish(int waitpid_options);
-#endif
-  bool use_console_;
+#endif  // !_WIN32
+
+  /// True if this subprocess should send its output directly to the current
+  /// console / terminal. Used for launching commands from Ninja edges that
+  /// belong to the "console" pool.
+  bool use_console_ = false;
 
   friend struct SubprocessSet;
 };
