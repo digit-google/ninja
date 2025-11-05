@@ -53,7 +53,7 @@ TEST_F(SubprocessTest, BadCommandStderr) {
 
   ExitStatus exit = subproc->Finish();
   EXPECT_NE(ExitSuccess, exit);
-  EXPECT_NE("", subproc->GetOutput());
+  EXPECT_NE("", subproc->GetStderr());
 }
 
 // Run a command that does not exist
@@ -70,8 +70,11 @@ TEST_F(SubprocessTest, NoSuchCommand) {
   EXPECT_NE(ExitSuccess, exit);
   EXPECT_NE("", subproc->GetOutput());
 #ifdef _WIN32
-  ASSERT_EQ("CreateProcess failed: The system cannot find the file "
-            "specified.\n", subproc->GetOutput());
+  EXPECT_EQ("", subproc->GetStdout());
+  ASSERT_EQ(
+      "CreateProcess failed: The system cannot find the file "
+      "specified.\n",
+      subproc->GetStderr());
 #endif
 }
 

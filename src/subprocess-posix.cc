@@ -39,41 +39,63 @@ namespace {
   ExitStatus ParseExitStatus(int status);
 }
 
-Subprocess::Subprocess(bool use_console) : fd_(-1), pid_(-1),
-                                           use_console_(use_console) {
-}
+Subprocess::Subprocess(bool use_console) : use_console_(use_console) {}
 
 Subprocess::~Subprocess() {
-  if (fd_ >= 0)
-    close(fd_);
+  stdout_pipe_.Close();
+  stderr_pipe_.Close();
+
   // Reap child if forgotten.
   if (pid_ != -1)
     Finish();
 }
 
+int Subprocess::OutputPipe::Setup(Subprocess* subproc) {
+  subproc_ = subproc;
+  int output_pipe[2];
+  if (pipe(output_pipe) < 0)
+    Fatal("pipe: %s", strerror(errno));
+  fd_ = output_pipe[0];
+#if !defined(USE_PPOLL)
+  // If available, we use ppoll in DoWork(); otherwise we use pselect
+  // and so must avoid overly-large FDs.
+  if (fd_ >= static_cast<int>(FD_SETSIZE))
+    Fatal("pipe: %s", strerror(EMFILE));
+#endif  // !USE_PPOLL
+  SetCloseOnExec(fd_);
+
+  return output_pipe[1];
+}
+
+void Subprocess::OutputPipe::Close() {
+  if (fd_ != -1) {
+    close(fd_);
+    fd_ = -1;
+  }
+}
+
+void Subprocess::OutputPipe::OnPipeReady() {
+  char buf[4 << 10];
+  ssize_t len = read(fd_, buf, sizeof(buf));
+  if (len > 0) {
+    buf_.append(buf, len);
+    subproc_->combined_output_.append(buf, len);
+  } else {
+    if (len < 0)
+      Fatal("read: %s", strerror(errno));
+    close(fd_);
+    fd_ = -1;
+  }
+}
+
 bool Subprocess::Start(SubprocessSet* set, const std::string& command) {
   int subproc_stdout_fd = -1;
-  if (use_console_) {
-    fd_ = -1;
-  } else {
-    int output_pipe[2];
-    if (pipe(output_pipe) < 0)
-      Fatal("pipe: %s", strerror(errno));
-    fd_ = output_pipe[0];
-    subproc_stdout_fd = output_pipe[1];
-    SetCloseOnExec(fd_);
-  }
+  int subproc_stderr_fd = -1;
 
   posix_spawn_file_actions_t action;
   int err = posix_spawn_file_actions_init(&action);
   if (err != 0)
     Fatal("posix_spawn_file_actions_init: %s", strerror(err));
-
-  if (!use_console_) {
-    err = posix_spawn_file_actions_addclose(&action, fd_);
-    if (err != 0)
-      Fatal("posix_spawn_file_actions_addclose: %s", strerror(err));
-  }
 
   posix_spawnattr_t attr;
   err = posix_spawnattr_init(&attr);
@@ -91,6 +113,17 @@ bool Subprocess::Start(SubprocessSet* set, const std::string& command) {
   // POSIX_SPAWN_SETSIGDEF parameter is needed.
 
   if (!use_console_) {
+    subproc_stdout_fd = stdout_pipe_.Setup(this);
+    subproc_stderr_fd = stderr_pipe_.Setup(this);
+
+    err = posix_spawn_file_actions_addclose(&action, stdout_pipe_.fd_);
+    if (err != 0)
+      Fatal("posix_spawn_file_actions_addclose: %s", strerror(err));
+
+    err = posix_spawn_file_actions_addclose(&action, stderr_pipe_.fd_);
+    if (err != 0)
+      Fatal("posix_spawn_file_actions_addclose: %s", strerror(err));
+
     // Put the child in its own process group, so ctrl-c won't reach it.
     flags |= POSIX_SPAWN_SETPGROUP;
     // No need to posix_spawnattr_setpgroup(&attr, 0), it's the default.
@@ -105,10 +138,13 @@ bool Subprocess::Start(SubprocessSet* set, const std::string& command) {
     err = posix_spawn_file_actions_adddup2(&action, subproc_stdout_fd, 1);
     if (err != 0)
       Fatal("posix_spawn_file_actions_adddup2: %s", strerror(err));
-    err = posix_spawn_file_actions_adddup2(&action, subproc_stdout_fd, 2);
+    err = posix_spawn_file_actions_adddup2(&action, subproc_stderr_fd, 2);
     if (err != 0)
       Fatal("posix_spawn_file_actions_adddup2: %s", strerror(err));
     err = posix_spawn_file_actions_addclose(&action, subproc_stdout_fd);
+    if (err != 0)
+      Fatal("posix_spawn_file_actions_addclose: %s", strerror(err));
+    err = posix_spawn_file_actions_addclose(&action, subproc_stderr_fd);
     if (err != 0)
       Fatal("posix_spawn_file_actions_addclose: %s", strerror(err));
   }
@@ -134,24 +170,12 @@ bool Subprocess::Start(SubprocessSet* set, const std::string& command) {
   if (err != 0)
     Fatal("posix_spawn_file_actions_destroy: %s", strerror(err));
 
-  if (!use_console_)
+  if (!use_console_) {
     close(subproc_stdout_fd);
+    close(subproc_stderr_fd);
+  }
   return true;
 }
-
-void Subprocess::OnPipeReady() {
-  char buf[4 << 10];
-  ssize_t len = read(fd_, buf, sizeof(buf));
-  if (len > 0) {
-    buf_.append(buf, len);
-  } else {
-    if (len < 0)
-      Fatal("read: %s", strerror(errno));
-    close(fd_);
-    fd_ = -1;
-  }
-}
-
 
 bool Subprocess::TryFinish(int waitpid_options) {
   assert(pid_ != -1);
@@ -208,11 +232,20 @@ bool Subprocess::Done() const {
   // when they exit.
   // For other processes, we consider them done when we have consumed all their
   // output and closed their associated pipe.
-  return (use_console_ && pid_ == -1) || (!use_console_ && fd_ == -1);
+  return use_console_ ? (pid_ == -1)
+                      : (stdout_pipe_.IsClosed() && stderr_pipe_.IsClosed());
 }
 
 const std::string& Subprocess::GetOutput() const {
-  return buf_;
+  return combined_output_;
+}
+
+const std::string& Subprocess::GetStdout() const {
+  return stdout_pipe_.buf_;
+}
+
+const std::string& Subprocess::GetStderr() const {
+  return stderr_pipe_.buf_;
 }
 
 volatile sig_atomic_t SubprocessSet::interrupted_;
@@ -392,7 +425,8 @@ bool SubprocessSet::DoWork() {
   FdWaiter waiter;
 
   for (const Subprocess* subproc : running_) {
-    waiter.AddFd(subproc->fd_);
+    waiter.AddFd(subproc->stdout_pipe_.fd_);
+    waiter.AddFd(subproc->stderr_pipe_.fd_);
   }
 
   interrupted_ = 0;
@@ -405,6 +439,7 @@ bool SubprocessSet::DoWork() {
   CheckConsoleProcessTerminated();
   if (ret == -1) {
     if (errno != EINTR) {
+      perror("ninja: ppoll");
       return false;
     }
     return IsInterrupted();
@@ -422,13 +457,16 @@ bool SubprocessSet::DoWork() {
   for (auto it = running_.begin(); it != running_.end();) {
     Subprocess* subproc = *it;
 
-    if (waiter.CheckFd(subproc->fd_)) {
-      subproc->OnPipeReady();
-      if (subproc->Done()) {
-        finished_.push(subproc);
-        it = running_.erase(it);
-        continue;
-      }
+    if (waiter.CheckFd(subproc->stdout_pipe_.fd_)) {
+      subproc->stdout_pipe_.OnPipeReady();
+    }
+    if (waiter.CheckFd(subproc->stderr_pipe_.fd_)) {
+      subproc->stderr_pipe_.OnPipeReady();
+    }
+    if (subproc->Done()) {
+      finished_.push(subproc);
+      it = running_.erase(it);
+      continue;
     }
     ++it;
   }

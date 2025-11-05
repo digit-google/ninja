@@ -22,22 +22,27 @@
 
 #include "util.h"
 
-Subprocess::Subprocess(bool use_console) : child_(NULL) , overlapped_(),
-                                           is_reading_(false),
-                                           use_console_(use_console) {
-}
+Subprocess::Subprocess(bool use_console) : use_console_(use_console) {}
 
 Subprocess::~Subprocess() {
-  if (pipe_) {
-    if (!CloseHandle(pipe_))
-      Win32Fatal("CloseHandle");
-  }
+  stdout_pipe_.Close();
+  stderr_pipe_.Close();
+
   // Reap child if forgotten.
   if (child_)
     Finish();
 }
 
-HANDLE Subprocess::SetupPipe(HANDLE ioport) {
+void Subprocess::OutputPipe::Close() {
+  if (pipe_ != INVALID_HANDLE_VALUE) {
+    CloseHandle(pipe_);
+    pipe_ = INVALID_HANDLE_VALUE;
+  }
+}
+
+HANDLE Subprocess::OutputPipe::Setup(HANDLE ioport, Subprocess* subproc) {
+  subproc_ = subproc;
+
   char pipe_name[100];
   snprintf(pipe_name, sizeof(pipe_name),
            "\\\\.\\pipe\\ninja_pid%lu_sp%p", GetCurrentProcessId(), this);
@@ -50,14 +55,17 @@ HANDLE Subprocess::SetupPipe(HANDLE ioport) {
   if (pipe_ == INVALID_HANDLE_VALUE)
     Win32Fatal("CreateNamedPipe");
 
-  if (!CreateIoCompletionPort(pipe_, ioport, (ULONG_PTR)this, 0))
+  if (!CreateIoCompletionPort(pipe_, ioport,
+                              reinterpret_cast<ULONG_PTR>(subproc), 0))
     Win32Fatal("CreateIoCompletionPort");
 
-  memset(&overlapped_, 0, sizeof(overlapped_));
+  overlapped_ = {};
   if (!ConnectNamedPipe(pipe_, &overlapped_) &&
       GetLastError() != ERROR_IO_PENDING) {
     Win32Fatal("ConnectNamedPipe");
   }
+
+  is_reading_ = false;
 
   // Get the write end of the pipe as a handle inheritable across processes.
   HANDLE output_write_handle =
@@ -74,28 +82,30 @@ HANDLE Subprocess::SetupPipe(HANDLE ioport) {
 }
 
 bool Subprocess::Start(SubprocessSet* set, const std::string& command) {
-  HANDLE child_pipe = SetupPipe(set->ioport_);
+  HANDLE stdout_child_pipe = INVALID_HANDLE_VALUE;
+  HANDLE stderr_child_pipe = INVALID_HANDLE_VALUE;
+  HANDLE nul = INVALID_HANDLE_VALUE;
 
-  SECURITY_ATTRIBUTES security_attributes;
-  memset(&security_attributes, 0, sizeof(SECURITY_ATTRIBUTES));
-  security_attributes.nLength = sizeof(SECURITY_ATTRIBUTES);
-  security_attributes.bInheritHandle = TRUE;
-  // Must be inheritable so subprocesses can dup to children.
-  HANDLE nul =
-      CreateFileA("NUL", GENERIC_READ,
-                  FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
-                  &security_attributes, OPEN_EXISTING, 0, NULL);
-  if (nul == INVALID_HANDLE_VALUE)
-    Fatal("couldn't open nul");
-
-  STARTUPINFOA startup_info;
-  memset(&startup_info, 0, sizeof(startup_info));
+  STARTUPINFOA startup_info = {};
   startup_info.cb = sizeof(STARTUPINFO);
   if (!use_console_) {
+    stdout_child_pipe = stdout_pipe_.Setup(set->ioport_, this);
+    stderr_child_pipe = stderr_pipe_.Setup(set->ioport_, this);
+
+    SECURITY_ATTRIBUTES security_attributes = {};
+    security_attributes.nLength = sizeof(SECURITY_ATTRIBUTES);
+    security_attributes.bInheritHandle = TRUE;
+    // Must be inheritable so subprocesses can dup to children.
+    nul = CreateFileA("NUL", GENERIC_READ,
+                      FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                      &security_attributes, OPEN_EXISTING, 0, NULL);
+    if (nul == INVALID_HANDLE_VALUE)
+      Fatal("couldn't open nul");
+
     startup_info.dwFlags = STARTF_USESTDHANDLES;
     startup_info.hStdInput = nul;
-    startup_info.hStdOutput = child_pipe;
-    startup_info.hStdError = child_pipe;
+    startup_info.hStdOutput = stdout_child_pipe;
+    startup_info.hStdError = stderr_child_pipe;
   }
   // In the console case, child_pipe is still inherited by the child and closed
   // when the subprocess finishes, which then notifies ninja.
@@ -108,44 +118,49 @@ bool Subprocess::Start(SubprocessSet* set, const std::string& command) {
 
   // Do not prepend 'cmd /c' on Windows, this breaks command
   // lines greater than 8,191 chars.
-  if (!CreateProcessA(NULL, (char*)command.c_str(), NULL, NULL,
-                      /* inherit handles */ TRUE, process_flags,
-                      NULL, NULL,
+  DWORD error = 0;
+  if (!CreateProcessA(NULL, const_cast<char*>(command.c_str()), NULL, NULL,
+                      /* inherit handles */ TRUE, process_flags, NULL, NULL,
                       &startup_info, &process_info)) {
-    DWORD error = GetLastError();
-    if (error == ERROR_FILE_NOT_FOUND) {
-      // File (program) not found error is treated as a normal build
-      // action failure.
-      if (child_pipe)
-        CloseHandle(child_pipe);
-      CloseHandle(pipe_);
-      CloseHandle(nul);
-      pipe_ = NULL;
-      // child_ is already NULL;
-      buf_ = "CreateProcess failed: The system cannot find the file "
-          "specified.\n";
-      return true;
-    } else {
-      fprintf(stderr, "\nCreateProcess failed. Command attempted:\n\"%s\"\n",
-              command.c_str());
-      const char* hint = NULL;
-      // ERROR_INVALID_PARAMETER means the command line was formatted
-      // incorrectly. This can be caused by a command line being too long or
-      // leading whitespace in the command. Give extra context for this case.
-      if (error == ERROR_INVALID_PARAMETER) {
-        if (command.length() > 0 && (command[0] == ' ' || command[0] == '\t'))
-          hint = "command contains leading whitespace";
-        else
-          hint = "is the command line too long?";
-      }
-      Win32Fatal("CreateProcess", hint);
-    }
+    error = GetLastError();
   }
 
-  // Close pipe channel only used by the child.
-  if (child_pipe)
-    CloseHandle(child_pipe);
-  CloseHandle(nul);
+  if (!use_console_) {
+    // Close child channels as they are never used by the parent.
+    CloseHandle(nul);
+    CloseHandle(stdout_child_pipe);
+    CloseHandle(stderr_child_pipe);
+  }
+
+  if (error == ERROR_FILE_NOT_FOUND) {
+    // File (program) not found error is treated as a normal build
+    // action failure.
+    stdout_pipe_.Close();
+    stderr_pipe_.Close();
+
+    // child_ is already NULL;
+    const char msg[] =
+        "CreateProcess failed: The system cannot find the file "
+        "specified.\n";
+    stderr_pipe_.buf_ = msg;
+    combined_output_ = msg;
+
+    return true;
+  } else if (error != 0) {
+    fprintf(stderr, "\nCreateProcess failed. Command attempted:\n\"%s\"\n",
+            command.c_str());
+    const char* hint = NULL;
+    // ERROR_INVALID_PARAMETER means the command line was formatted
+    // incorrectly. This can be caused by a command line being too long or
+    // leading whitespace in the command. Give extra context for this case.
+    if (error == ERROR_INVALID_PARAMETER) {
+      if (command.length() > 0 && (command[0] == ' ' || command[0] == '\t'))
+        hint = "command contains leading whitespace";
+      else
+        hint = "is the command line too long?";
+    }
+    Win32Fatal("CreateProcess", hint);
+  }
 
   CloseHandle(process_info.hThread);
   child_ = process_info.hProcess;
@@ -153,27 +168,41 @@ bool Subprocess::Start(SubprocessSet* set, const std::string& command) {
   return true;
 }
 
-void Subprocess::OnPipeReady() {
+const std::string& Subprocess::GetOutput() const {
+  return combined_output_;
+}
+
+const std::string& Subprocess::GetStdout() const {
+  return stdout_pipe_.buf_;
+}
+
+const std::string& Subprocess::GetStderr() const {
+  return stderr_pipe_.buf_;
+}
+
+void Subprocess::OutputPipe::OnPipeReady() {
   DWORD bytes;
   if (!GetOverlappedResult(pipe_, &overlapped_, &bytes, TRUE)) {
     if (GetLastError() == ERROR_BROKEN_PIPE) {
-      CloseHandle(pipe_);
-      pipe_ = NULL;
+      Close();
       return;
     }
     Win32Fatal("GetOverlappedResult");
   }
 
-  if (is_reading_ && bytes)
+  if (is_reading_ && bytes) {
     buf_.append(overlapped_buf_, bytes);
 
-  memset(&overlapped_, 0, sizeof(overlapped_));
+    // Append to the subprocess' combined output as well.
+    subproc_->combined_output_.append(overlapped_buf_, bytes);
+  }
+
+  overlapped_ = {};
   is_reading_ = true;
   if (!::ReadFile(pipe_, overlapped_buf_, sizeof(overlapped_buf_),
                   &bytes, &overlapped_)) {
     if (GetLastError() == ERROR_BROKEN_PIPE) {
-      CloseHandle(pipe_);
-      pipe_ = NULL;
+      Close();
       return;
     }
     if (GetLastError() != ERROR_IO_PENDING)
@@ -202,11 +231,7 @@ ExitStatus Subprocess::Finish() {
 }
 
 bool Subprocess::Done() const {
-  return pipe_ == NULL;
-}
-
-const std::string& Subprocess::GetOutput() const {
-  return buf_;
+  return stdout_pipe_.IsClosed() && stderr_pipe_.IsClosed();
 }
 
 HANDLE SubprocessSet::ioport_;
@@ -254,7 +279,8 @@ bool SubprocessSet::DoWork() {
   Subprocess* subproc;
   OVERLAPPED* overlapped;
 
-  if (!GetQueuedCompletionStatus(ioport_, &bytes_read, (PULONG_PTR)&subproc,
+  if (!GetQueuedCompletionStatus(ioport_, &bytes_read,
+                                 reinterpret_cast<PULONG_PTR>(&subproc),
                                  &overlapped, INFINITE)) {
     if (GetLastError() != ERROR_BROKEN_PIPE)
       Win32Fatal("GetQueuedCompletionStatus");
@@ -264,7 +290,13 @@ bool SubprocessSet::DoWork() {
                 // delivered by NotifyInterrupted above.
     return true;
 
-  subproc->OnPipeReady();
+  if (overlapped == &subproc->stdout_pipe_.overlapped_)
+    subproc->stdout_pipe_.OnPipeReady();
+  else if (overlapped == &subproc->stderr_pipe_.overlapped_)
+    subproc->stderr_pipe_.OnPipeReady();
+  else
+    Fatal("Unknown overlapped pointer %p for subprocess %p", overlapped,
+          subproc);
 
   if (subproc->Done()) {
     std::vector<Subprocess*>::iterator end =
