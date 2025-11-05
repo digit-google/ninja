@@ -49,9 +49,6 @@ struct Subprocess {
   void OnPipeReady();
   bool Done() const;
 
-  /// Retrieve the command's combined stdout and stderr
-  const std::string& GetOutput() const;
-
   /// Retrieve the command's stdout only.
   const std::string& GetStdout() const;
 
@@ -61,11 +58,6 @@ struct Subprocess {
  private:
   Subprocess(bool use_console);
   bool Start(struct SubprocessSet* set, const std::string& command);
-
-  /// The combined stdout + stderr output, note that this mixes
-  /// both streams in unpredictable ways. This is maintained here
-  /// in case some developer workflows depend on it.
-  std::string combined_output_;
 
 #ifdef _WIN32
   /// Models a single stdout or stderr buffer receiving data from
@@ -127,14 +119,13 @@ struct Subprocess {
   /// A version of OutputPipe for Posix, usage is similar to its Win32 version.
   struct OutputPipe {
     ~OutputPipe() { Close(); }
-    int Setup(Subprocess* subproc);
+    int Setup();
     void OnPipeReady();
     void Close();
     bool IsClosed() const { return fd_ == -1; }
 
     int fd_ = -1;
     std::string buf_;
-    Subprocess* subproc_ = nullptr;
   };
 
   /// Output buffer for non-console subprocesses. Ignored if use_console_ is

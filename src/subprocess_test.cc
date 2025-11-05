@@ -68,14 +68,14 @@ TEST_F(SubprocessTest, NoSuchCommand) {
 
   ExitStatus exit = subproc->Finish();
   EXPECT_NE(ExitSuccess, exit);
-  EXPECT_NE("", subproc->GetOutput());
-#ifdef _WIN32
   EXPECT_EQ("", subproc->GetStdout());
+  EXPECT_NE("", subproc->GetStderr());
+#ifdef _WIN32
   ASSERT_EQ(
       "CreateProcess failed: The system cannot find the file "
       "specified.\n",
       subproc->GetStderr());
-#endif
+#endif  // _WIN32
 }
 
 #ifndef _WIN32
@@ -177,7 +177,8 @@ TEST_F(SubprocessTest, SetWithSingle) {
     subprocs_.DoWork();
   }
   ASSERT_EQ(ExitSuccess, subproc->Finish());
-  ASSERT_NE("", subproc->GetOutput());
+  ASSERT_NE("", subproc->GetStdout());
+  ASSERT_EQ("", subproc->GetStderr());
 
   ASSERT_EQ(1u, subprocs_.finished_.size());
 }
@@ -203,7 +204,8 @@ TEST_F(SubprocessTest, SetWithMulti) {
   ASSERT_EQ(3u, subprocs_.running_.size());
   for (int i = 0; i < 3; ++i) {
     ASSERT_FALSE(processes[i]->Done());
-    ASSERT_EQ("", processes[i]->GetOutput());
+    ASSERT_EQ("", processes[i]->GetStdout());
+    ASSERT_EQ("", processes[i]->GetStderr());
   }
 
   while (!processes[0]->Done() || !processes[1]->Done() ||
@@ -217,7 +219,8 @@ TEST_F(SubprocessTest, SetWithMulti) {
 
   for (int i = 0; i < 3; ++i) {
     ASSERT_EQ(ExitSuccess, processes[i]->Finish());
-    ASSERT_NE("", processes[i]->GetOutput());
+    ASSERT_NE("", processes[i]->GetStdout());
+    ASSERT_EQ("", processes[i]->GetStderr());
     delete processes[i];
   }
 }
@@ -247,7 +250,8 @@ TEST_F(SubprocessTest, SetWithLots) {
     subprocs_.DoWork();
   for (size_t i = 0; i < procs.size(); ++i) {
     ASSERT_EQ(ExitSuccess, procs[i]->Finish());
-    ASSERT_NE("", procs[i]->GetOutput());
+    ASSERT_NE("", procs[i]->GetStdout());
+    ASSERT_EQ("", procs[i]->GetStderr());
   }
   ASSERT_EQ(kNumProcs, subprocs_.finished_.size());
 }

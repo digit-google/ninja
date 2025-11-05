@@ -156,8 +156,8 @@ struct CommandRunner {
   struct Result {
     Edge* edge = nullptr;
     ExitStatus status = ExitFailure;
-    std::string output;      // combined stdout + stderr
     std::string std_output;  // stdout only.
+    std::string err_output;  // stderr only.
     bool success() const { return status == ExitSuccess; }
   };
   /// Wait for a command to complete, or return false if interrupted.
