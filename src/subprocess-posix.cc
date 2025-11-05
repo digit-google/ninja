@@ -61,12 +61,6 @@ bool Subprocess::Start(SubprocessSet* set, const std::string& command) {
       Fatal("pipe: %s", strerror(errno));
     fd_ = output_pipe[0];
     subproc_stdout_fd = output_pipe[1];
-#if !defined(USE_PPOLL)
-    // If available, we use ppoll in DoWork(); otherwise we use pselect
-    // and so must avoid overly-large FDs.
-    if (fd_ >= static_cast<int>(FD_SETSIZE))
-      Fatal("pipe: %s", strerror(EMFILE));
-#endif  // !USE_PPOLL
     SetCloseOnExec(fd_);
   }
 
@@ -316,38 +310,101 @@ Subprocess* SubprocessSet::Add(const std::string& command, bool use_console) {
   return subprocess;
 }
 
+/// Helper class to wait for read events on a collection of file descriptors.
+/// Usage is:
+///   1) Create instance.
+///   2) Call AddFd() for each file descriptor to wait for.
+///   3) Call Wait() for wait for at least one i/o event or EINTR.
+///   4) If not interrupted, call CheckFd() in the same order than AddFd()
+///      was called.
+///
+/// This implementation is based on pselect(), it is always compiled
 #ifdef USE_PPOLL
-bool SubprocessSet::DoWork() {
-  std::vector<pollfd> fds;
-  nfds_t nfds = 0;
+struct FdWaiter {
+  std::vector<pollfd> fds_;
+  nfds_t nfds_ = 0;
+  nfds_t cur_nfd_ = 0;
 
-  for (std::vector<Subprocess*>::iterator i = running_.begin();
-       i != running_.end(); ++i) {
-    int fd = (*i)->fd_;
+  void AddFd(int fd) {
     if (fd < 0)
-      continue;
+      return;
+
     pollfd pfd = { fd, POLLIN | POLLPRI, 0 };
-    fds.push_back(pfd);
-    ++nfds;
+    fds_.push_back(pfd);
+    ++nfds_;
   }
-  if (nfds == 0) {
-    // Add a dummy entry to prevent using an empty pollfd vector.
-    // ppoll() allows to do this by setting fd < 0.
-    pollfd pfd = { -1, 0, 0 };
-    fds.push_back(pfd);
-    ++nfds;
+
+  int Wait(const sigset_t* wait_mask) {
+    if (nfds_ == 0) {
+      // Add a dummy entry to prevent using an empty pollfd vector.
+      // ppoll() allows to do this by setting fd < 0.
+      pollfd pfd = { -1, 0, 0 };
+      fds_.push_back(pfd);
+      ++nfds_;
+    }
+
+    cur_nfd_ = 0;
+
+    int ret = ppoll(&fds_.front(), nfds_, NULL, wait_mask);
+    if (ret < 0 && errno != EINTR)
+      perror("ninja: ppoll");
+    return ret;
+  }
+
+  bool CheckFd(int fd) {
+    if (fd < 0)
+      return false;
+    assert(fd == fds_[cur_nfd_].fd);
+    return fds_[cur_nfd_++].revents != 0;
+  }
+};
+#else   // !USE_PPOLL
+struct FdWaiter {
+  fd_set set_;
+  int nfds_ = 0;
+
+  FdWaiter() { FD_ZERO(&set_); }
+
+  void AddFd(int fd) {
+    if (fd < 0)
+      return;
+
+    if (fd >= static_cast<int>(FD_SETSIZE))
+      Fatal("PselectFdWaiter: %s", strerror(EMFILE));
+
+    FD_SET(fd, &set_);
+    if (nfds_ < fd + 1)
+      nfds_ = fd + 1;
+  }
+
+  int Wait(const sigset_t* wait_mask) {
+    int ret = pselect(nfds_, (nfds_ > 0 ? &set_ : nullptr), 0, 0, 0, wait_mask);
+    if (ret < 0 && errno != EINTR)
+      perror("ninja: pselect");
+    return ret;
+  }
+
+  bool CheckFd(int fd) { return (fd >= 0 && FD_ISSET(fd, &set_)); }
+};
+#endif  // !USE_PPOLL
+
+bool SubprocessSet::DoWork() {
+  FdWaiter waiter;
+
+  for (const Subprocess* subproc : running_) {
+    waiter.AddFd(subproc->fd_);
   }
 
   interrupted_ = 0;
   s_sigchld_received = 0;
-  int ret = ppoll(&fds.front(), nfds, NULL, &old_mask_);
+  int ret = waiter.Wait(&old_mask_);
+
   // Note: This can remove console processes from the running set, but that is
   // not a problem for the pollfd set, as console processes are not part of the
   // pollfd set (they don't have a fd).
   CheckConsoleProcessTerminated();
   if (ret == -1) {
     if (errno != EINTR) {
-      perror("ninja: ppoll");
       return false;
     }
     return IsInterrupted();
@@ -360,83 +417,24 @@ bool SubprocessSet::DoWork() {
   if (IsInterrupted())
     return true;
 
-  // Iterate through both the pollfd set and the running set.
-  // All valid fds in the running set are in the pollfd, in the same order.
-  nfds_t cur_nfd = 0;
-  for (std::vector<Subprocess*>::iterator i = running_.begin();
-       i != running_.end();) {
-    int fd = (*i)->fd_;
-    if (fd < 0) {
-      ++i;
-      continue;
-    }
-    assert(fd == fds[cur_nfd].fd);
-    if (fds[cur_nfd++].revents) {
-      (*i)->OnPipeReady();
-      if ((*i)->Done()) {
-        finished_.push(*i);
-        i = running_.erase(i);
+  // Iterate through the waiter fds in the same order and detect when
+  // non-console subprocesses have completed.
+  for (auto it = running_.begin(); it != running_.end();) {
+    Subprocess* subproc = *it;
+
+    if (waiter.CheckFd(subproc->fd_)) {
+      subproc->OnPipeReady();
+      if (subproc->Done()) {
+        finished_.push(subproc);
+        it = running_.erase(it);
         continue;
       }
     }
-    ++i;
+    ++it;
   }
 
   return IsInterrupted();
 }
-
-#else  // !defined(USE_PPOLL)
-bool SubprocessSet::DoWork() {
-  fd_set set;
-  int nfds = 0;
-  FD_ZERO(&set);
-
-  for (std::vector<Subprocess*>::iterator i = running_.begin();
-       i != running_.end(); ++i) {
-    int fd = (*i)->fd_;
-    if (fd >= 0) {
-      FD_SET(fd, &set);
-      if (nfds < fd+1)
-        nfds = fd+1;
-    }
-  }
-
-  interrupted_ = 0;
-  s_sigchld_received = 0;
-  int ret = pselect(nfds, (nfds > 0 ? &set : nullptr), 0, 0, 0, &old_mask_);
-  CheckConsoleProcessTerminated();
-  if (ret == -1) {
-    if (errno != EINTR) {
-      perror("ninja: pselect");
-      return false;
-    }
-    return IsInterrupted();
-  }
-
-  // ppoll/pselect prioritizes file descriptor events over a signal delivery.
-  // However, if the user is trying to quit ninja, we should react as fast as
-  // possible.
-  HandlePendingInterruption();
-  if (IsInterrupted())
-    return true;
-
-  for (std::vector<Subprocess*>::iterator i = running_.begin();
-       i != running_.end();) {
-    int fd = (*i)->fd_;
-    if (fd >= 0 && FD_ISSET(fd, &set)) {
-      (*i)->OnPipeReady();
-      if ((*i)->Done()) {
-        finished_.push(*i);
-        i = running_.erase(i);
-        continue;
-      }
-    }
-    ++i;
-  }
-
-  return IsInterrupted();
-}
-#endif  // !defined(USE_PPOLL)
 
 Subprocess* SubprocessSet::NextFinished() {
   if (finished_.empty())
