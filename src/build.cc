@@ -989,7 +989,7 @@ bool Builder::ExtractDeps(CommandRunner::Result* result,
   if (deps_type == "msvc") {
     CLParser parser;
     string output;
-    if (!parser.Parse(result->output, deps_prefix, &output, err))
+    if (!parser.Parse(result->std_output, deps_prefix, &output, err))
       return false;
     result->output = output;
     for (set<string>::iterator i = parser.includes_.begin();
