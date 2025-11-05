@@ -891,9 +891,9 @@ bool Builder::FinishCommand(CommandRunner::Result* result, string* err) {
     if (!ExtractDeps(result, deps_type, deps_prefix, &deps_nodes,
                      &extract_err) &&
         result->success()) {
-      if (!result->output.empty())
-        result->output.append("\n");
-      result->output.append(extract_err);
+      if (!result->err_output.empty())
+        result->err_output.append("\n");
+      result->err_output.append(extract_err);
       result->status = ExitFailure;
     }
   }
@@ -905,7 +905,8 @@ bool Builder::FinishCommand(CommandRunner::Result* result, string* err) {
   running_edges_.erase(it);
 
   status_->BuildEdgeFinished(edge, start_time_millis, end_time_millis,
-                             result->status, result->output);
+                             result->status,
+                             result->std_output + result->err_output);
 
   // The rest of this function only applies to successful commands.
   if (!result->success()) {
@@ -991,7 +992,7 @@ bool Builder::ExtractDeps(CommandRunner::Result* result,
     string output;
     if (!parser.Parse(result->std_output, deps_prefix, &output, err))
       return false;
-    result->output = output;
+    result->std_output = output;
     for (set<string>::iterator i = parser.includes_.begin();
          i != parser.includes_.end(); ++i) {
       // ~0 is assuming that with MSVC-parsed headers, it's ok to always make

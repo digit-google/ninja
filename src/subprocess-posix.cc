@@ -50,8 +50,7 @@ Subprocess::~Subprocess() {
     Finish();
 }
 
-int Subprocess::OutputPipe::Setup(Subprocess* subproc) {
-  subproc_ = subproc;
+int Subprocess::OutputPipe::Setup() {
   int output_pipe[2];
   if (pipe(output_pipe) < 0)
     Fatal("pipe: %s", strerror(errno));
@@ -79,7 +78,6 @@ void Subprocess::OutputPipe::OnPipeReady() {
   ssize_t len = read(fd_, buf, sizeof(buf));
   if (len > 0) {
     buf_.append(buf, len);
-    subproc_->combined_output_.append(buf, len);
   } else {
     if (len < 0)
       Fatal("read: %s", strerror(errno));
@@ -113,8 +111,8 @@ bool Subprocess::Start(SubprocessSet* set, const std::string& command) {
   // POSIX_SPAWN_SETSIGDEF parameter is needed.
 
   if (!use_console_) {
-    subproc_stdout_fd = stdout_pipe_.Setup(this);
-    subproc_stderr_fd = stderr_pipe_.Setup(this);
+    subproc_stdout_fd = stdout_pipe_.Setup();
+    subproc_stderr_fd = stderr_pipe_.Setup();
 
     err = posix_spawn_file_actions_addclose(&action, stdout_pipe_.fd_);
     if (err != 0)
@@ -234,10 +232,6 @@ bool Subprocess::Done() const {
   // output and closed their associated pipe.
   return use_console_ ? (pid_ == -1)
                       : (stdout_pipe_.IsClosed() && stderr_pipe_.IsClosed());
-}
-
-const std::string& Subprocess::GetOutput() const {
-  return combined_output_;
 }
 
 const std::string& Subprocess::GetStdout() const {

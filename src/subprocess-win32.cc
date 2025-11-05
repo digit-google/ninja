@@ -143,7 +143,6 @@ bool Subprocess::Start(SubprocessSet* set, const std::string& command) {
         "CreateProcess failed: The system cannot find the file "
         "specified.\n";
     stderr_pipe_.buf_ = msg;
-    combined_output_ = msg;
 
     return true;
   } else if (error != 0) {
@@ -168,10 +167,6 @@ bool Subprocess::Start(SubprocessSet* set, const std::string& command) {
   return true;
 }
 
-const std::string& Subprocess::GetOutput() const {
-  return combined_output_;
-}
-
 const std::string& Subprocess::GetStdout() const {
   return stdout_pipe_.buf_;
 }
@@ -192,9 +187,6 @@ void Subprocess::OutputPipe::OnPipeReady() {
 
   if (is_reading_ && bytes) {
     buf_.append(overlapped_buf_, bytes);
-
-    // Append to the subprocess' combined output as well.
-    subproc_->combined_output_.append(overlapped_buf_, bytes);
   }
 
   overlapped_ = {};
