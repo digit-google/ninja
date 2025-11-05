@@ -750,9 +750,9 @@ bool FakeCommandRunner::WaitForCommand(Result* result) {
 
   if (edge->rule().name() == "cp_multi_msvc") {
     const std::string prefix = edge->GetBinding("msvc_deps_prefix");
-    for (std::vector<Node*>::iterator in = edge->inputs_.begin();
-         in != edge->inputs_.end(); ++in) {
-      result->output += prefix + (*in)->path() + '\n';
+    for (const Node* input : edge->inputs_) {
+      result->output += prefix + input->path() + '\n';
+      result->std_output = result->output;
     }
   }
 

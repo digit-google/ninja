@@ -104,6 +104,7 @@ bool RealCommandRunner::WaitForCommand(Result* result) {
 
   result->status = subproc->Finish();
   result->output = subproc->GetOutput();
+  result->std_output = subproc->GetStdout();
 
   std::map<const Subprocess*, Edge*>::iterator e =
       subproc_to_edge_.find(subproc);
