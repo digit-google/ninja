@@ -75,6 +75,14 @@ struct DiskInterface: public FileReader {
   /// directory to a file or a non-empty one directory).
   virtual bool RenameFile(const std::string& from, const std::string& to) = 0;
 
+  /// Replace the content of |dest_file| with the content from |replacement_file|
+  /// then delete the latter. On non Windows platforms, This takes care of preserving
+  /// the uid/gid of |dest_file|. On success, remove replacement file then return true,
+  /// on failure, set |*err| then return false.
+  virtual bool ReplaceFileContent(const std::string& dest_file,
+                                  const std::string& replacement_file,
+                                  std::string* err) = 0;
+
   /// Create all the parent directories for path; like mkdir -p
   /// `basename path`.
   bool MakeDirs(const std::string& path);
@@ -93,6 +101,7 @@ struct SystemDiskInterface : public DiskInterface {
   int RemoveFile(const std::string& path) override;
   FILE* OpenFile(const std::string& path, const char* mode) override;
   bool RenameFile(const std::string& from, const std::string& to) override;
+  bool ReplaceFileContent(const std::string& dest_file, const std::string& replacement_file, std::string* err) override;
 
   /// Whether stat information can be cached.  Only has an effect on Windows.
   void AllowStatCache(bool allow);
@@ -122,6 +131,7 @@ struct NullDiskInterface : public DiskInterface {
   int RemoveFile(const std::string& path) override;
   FILE* OpenFile(const std::string& path, const char* mode) override;
   bool RenameFile(const std::string& from, const std::string& to) override;
+  bool ReplaceFileContent(const std::string& dest_file, const std::string& replacement_file, std::string* err) override;
 };
 
 /// Implementation of SystemDiskInterface that speeds up Stat() calls by using

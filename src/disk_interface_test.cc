@@ -390,7 +390,7 @@ TEST_F(DiskInterfaceTest, RenameFile) {
   // with \r\n conversions on Win32.
   std::string kContent = "something something";
 
-  ASSERT_TRUE(disk_.WriteFile(kFileA, kContent));
+  ASSERT_TRUE(disk_.WriteFile(kFileA, kContent, false));
   std::string err;
   TimeStamp stamp_a = disk_.Stat(kFileA, &err);
   ASSERT_GT(stamp_a, 0);
@@ -413,7 +413,7 @@ TEST_F(DiskInterfaceTest, RenameFile) {
   // Now write something else to the first file, and rename
   // the second one to the first. This should work on Posix, and
   // fail with EEXIST on Win32!
-  ASSERT_TRUE(disk_.WriteFile(kFileA, "something else entirely"));
+  ASSERT_TRUE(disk_.WriteFile(kFileA, "something else entirely", false));
   stamp_a = disk_.Stat(kFileA, &err);
   ASSERT_GT(stamp_a, 0) << err;
   ASSERT_GE(stamp_a, stamp_b) << err;  // see comment above.

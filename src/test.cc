@@ -362,7 +362,7 @@ bool VirtualFileSystem::RenameFile(const std::string& from,
         const std::string& path = pair.first;
         if (path.substr(0, to_prefix.size()) == to_prefix) {
           errno = ENOTEMPTY;
-          return -1;
+          return false;
         }
       }
     }
@@ -404,12 +404,22 @@ bool VirtualFileSystem::RenameFile(const std::string& from,
   // The source is a file, check that the destination is not a directory.
   if (std::find(dirs.begin(), dirs.end(), to) != dirs.end()) {
     errno = EISDIR;
-    return -1;
+    return false;
   }
 
   // Overwrite destination file in map.
   files_[to] = std::move(file_it->second);
   files_.erase(file_it);
+  return true;
+}
+
+bool VirtualFileSystem::ReplaceFileContent(const std::string& dest_file,
+                                           const std::string& replacement_file,
+                                           std::string* err) {
+  if (!this->RenameFile(replacement_file, dest_file)) {
+    *err = strerror(errno);
+    return false;
+  }
   return true;
 }
 

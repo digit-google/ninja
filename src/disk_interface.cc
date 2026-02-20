@@ -27,6 +27,7 @@
 #include <direct.h>  // _mkdir
 #include <windows.h>
 
+#include <cwctype>
 #include <sstream>
 #else
 #include <unistd.h>
@@ -403,6 +404,12 @@ bool SystemDiskInterface::RenameFile(const std::string& from,
 #endif  // !_WIN32
 }
 
+bool SystemDiskInterface::ReplaceFileContent(const std::string& dest_file,
+                                             const std::string& replacement_file,
+                                             std::string* error) {
+  return ReplaceContent(dest_file, replacement_file, error);
+}
+
 #ifdef _WIN32
 bool SystemDiskInterface::AreLongPathsEnabled(void) const {
   return long_paths_enabled_;
@@ -450,6 +457,16 @@ bool NullDiskInterface::RenameFile(const std::string& from,
   assert(false);
   (void)from;
   (void)to;
+  return false;
+}
+
+bool NullDiskInterface::ReplaceFileContent(const std::string& dest_file,
+                                           const std::string& replacement_file,
+                                           std::string* err) {
+  assert(false);
+  (void)dest_file;
+  (void)replacement_file;
+  *err = "Unimplemented";
   return false;
 }
 
